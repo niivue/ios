@@ -10,6 +10,7 @@
 		3485664D2B5426A4008EF4DD /* dist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 3485664C2B5426A4008EF4DD /* dist */; };
 		3487D3492BC85E5B007C6D7C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3487D3482BC85E5B007C6D7C /* ContentView.swift */; };
 		3487D34F2BCFD932007C6D7C /* SharedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3487D34E2BCFD932007C6D7C /* SharedData.swift */; };
+		34C48D4F2BF297FD00486C4E /* samples in CopyFiles */ = {isa = PBXBuildFile; fileRef = 34C48D4E2BF297FD00486C4E /* samples */; };
 		34CD17F62B45C5400015EF4C /* NiiVueApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CD17F52B45C5400015EF4C /* NiiVueApp.swift */; };
 		34CD17FA2B45C5410015EF4C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 34CD17F92B45C5410015EF4C /* Assets.xcassets */; };
 		34CD17FD2B45C5410015EF4C /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 34CD17FC2B45C5410015EF4C /* Preview Assets.xcassets */; };
@@ -42,6 +43,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 7;
 			files = (
+				34C48D4F2BF297FD00486C4E /* samples in CopyFiles */,
 				3485664D2B5426A4008EF4DD /* dist in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -55,6 +57,7 @@
 		3487D34C2BCB2146007C6D7C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		3487D34D2BCB2250007C6D7C /* NiiVue.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NiiVue.entitlements; sourceTree = "<group>"; };
 		3487D34E2BCFD932007C6D7C /* SharedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedData.swift; sourceTree = "<group>"; };
+		34C48D4E2BF297FD00486C4E /* samples */ = {isa = PBXFileReference; lastKnownFileType = folder; name = samples; path = NiiVue/samples; sourceTree = "<group>"; };
 		34CD17F22B45C5400015EF4C /* NiiVue.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NiiVue.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		34CD17F52B45C5400015EF4C /* NiiVueApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiiVueApp.swift; sourceTree = "<group>"; };
 		34CD17F92B45C5410015EF4C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -94,6 +97,7 @@
 		34CD17E92B45C5400015EF4C = {
 			isa = PBXGroup;
 			children = (
+				34C48D4E2BF297FD00486C4E /* samples */,
 				3485664C2B5426A4008EF4DD /* dist */,
 				34CD17F42B45C5400015EF4C /* NiiVue */,
 				34CD18052B45C5420015EF4C /* NiiVueTests */,
@@ -464,7 +468,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = NiiVue/NiiVue.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_ASSET_PATHS = "\"NiiVue/Preview Content\"";
 				DEVELOPMENT_TEAM = VJ2G5D3BY7;
 				ENABLE_PREVIEWS = YES;
@@ -499,7 +503,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = NiiVue/NiiVue.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_ASSET_PATHS = "\"NiiVue/Preview Content\"";
 				DEVELOPMENT_TEAM = VJ2G5D3BY7;
 				ENABLE_PREVIEWS = YES;

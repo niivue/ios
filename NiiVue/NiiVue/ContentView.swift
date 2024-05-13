@@ -282,8 +282,13 @@ struct ContentView: View {
         "locationChange": {location in
 //            sharedData.location = location
             print(location)
+        },
+        "finishedLoading": {message in
+            print("finished loading message: ")
+            print(message)
         }
     ])
+    @State private var isWebviewLoading = false // TODO: implement this!
     @State private var documentPickerPresented = false
     @State private var settingsSheetPresented = false
     @State private var pickedDocumentURL: URL?
@@ -642,6 +647,21 @@ struct ContentView: View {
             WebView(manager: webViewManager)
                 .onAppear {
                     webViewManager.load()
+                    // load the demo image after a small delay since we need the
+                    // web page to be ready prior to loading
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                        // this is a stupid necessity when describing file paths
+                        var url: URL = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples")!
+                        // updating pickedDocumentURL will automatically set the name in the top left corner of the UI
+                        pickedDocumentURL = url
+                        //print("\(String(describing: pickedDocumentURL!.lastPathComponent))")
+                        if let encodedString = encodeFileToBase64(url: url) {
+                            // setting base64EncodedString will trigger the
+                            // loading of a new image in NiiVue
+                            base64EncodedString = encodedString
+                        }
+                    }
+                    
                 } // onAppear
                 .background(Color.black)
                 .padding()

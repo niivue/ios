@@ -55,7 +55,8 @@ function App() {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const nvRef = React.useRef<Niivue>(new Niivue(
     {
-      logLevel: 'debug'
+      logLevel: 'debug',
+      loadingText: 'Loading...',
     }
   ));
   const nv = nvRef.current;
