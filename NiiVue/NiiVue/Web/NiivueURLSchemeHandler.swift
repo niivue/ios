@@ -1,0 +1,211 @@
+//
+//  NiivueURLSchemeHandler.swift
+//  NiiVue
+//
+//  Task 10: Custom URL scheme handler for niivue:// URLs
+//  Serves bundled dist/, samples/, and imported files without base64 encoding.
+//
+
+import Foundation
+import WebKit
+
+/// Handles niivue:// URL scheme requests from the WKWebView.
+/// This allows the web app to load files directly without base64 encoding.
+@MainActor
+final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
+    private let router = NiivueURLRouter()
+
+    /// File store for resolving imported file IDs to URLs
+    /// Set this before the WebView starts making requests
+    var importedFileStore: ImportedFileStore?
+
+    private struct ActiveWork {
+        let token: UUID
+        let task: Task<Void, Never>
+    }
+
+    private let chunkSizeBytes = 64 * 1024
+    private var activeWork: [ObjectIdentifier: ActiveWork] = [:]
+
+    enum HandlerError: Error {
+        case invalidURL
+        case routingFailed
+        case fileNotFound
+        case notImplemented
+    }
+
+    // MARK: - WKURLSchemeHandler
+
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        let taskID = ObjectIdentifier(urlSchemeTask as AnyObject)
+        activeWork[taskID]?.task.cancel()
+        activeWork[taskID] = nil
+
+        guard let url = urlSchemeTask.request.url else {
+            urlSchemeTask.didFailWithError(HandlerError.invalidURL)
+            return
+        }
+
+        guard let route = router.route(url) else {
+            urlSchemeTask.didFailWithError(HandlerError.routingFailed)
+            return
+        }
+
+        // Dispatch to appropriate handler
+        switch route {
+        case .dist(let path):
+            serveDistFile(path: path, task: urlSchemeTask)
+
+        case .sample(let path):
+            serveSampleFile(path: path, task: urlSchemeTask)
+
+        case .importedFile(let id):
+            serveImportedFile(id: id, task: urlSchemeTask)
+        }
+    }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {
+        let taskID = ObjectIdentifier(urlSchemeTask as AnyObject)
+        activeWork[taskID]?.task.cancel()
+        activeWork[taskID] = nil
+    }
+
+    // MARK: - File Serving
+
+    private func serveDistFile(path: String, task: WKURLSchemeTask) {
+        // Task 11 will implement: serve from Bundle.main.resourceURL/dist/
+        guard let resourceURL = Bundle.main.resourceURL else {
+            task.didFailWithError(HandlerError.fileNotFound)
+            return
+        }
+
+        let fileURL = resourceURL.appendingPathComponent("dist").appendingPathComponent(path)
+        serveFile(at: fileURL, task: task)
+    }
+
+    private func serveSampleFile(path: String, task: WKURLSchemeTask) {
+        // Task 11 will implement: serve from Bundle.main.resourceURL/samples/
+        guard let resourceURL = Bundle.main.resourceURL else {
+            task.didFailWithError(HandlerError.fileNotFound)
+            return
+        }
+
+        let fileURL = resourceURL.appendingPathComponent("samples").appendingPathComponent(path)
+        serveFile(at: fileURL, task: task)
+    }
+
+    private func serveImportedFile(id: String, task: WKURLSchemeTask) {
+        let taskID = ObjectIdentifier(task as AnyObject)
+        let token = UUID()
+
+        let work = Task { @MainActor [weak self] in
+            defer {
+                if self?.activeWork[taskID]?.token == token {
+                    self?.activeWork[taskID] = nil
+                }
+            }
+
+            if Task.isCancelled { return }
+            guard let store = self?.importedFileStore,
+                  let fileURL = await store.url(for: id) else {
+                task.didFailWithError(HandlerError.fileNotFound)
+                return
+            }
+            if Task.isCancelled { return }
+            self?.serveFile(at: fileURL, task: task)
+        }
+
+        activeWork[taskID] = ActiveWork(token: token, task: work)
+    }
+
+    private func serveFile(at url: URL, task: WKURLSchemeTask) {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            task.didFailWithError(HandlerError.fileNotFound)
+            return
+        }
+
+        let taskID = ObjectIdentifier(task as AnyObject)
+        let token = UUID()
+        let requestURL = task.request.url!
+        let mimeType = mimeTypeForPath(url.path)
+
+        let expectedContentLength: Int = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+
+        let work = Task.detached(priority: .userInitiated) { [chunkSizeBytes] in
+            do {
+                if Task.isCancelled { return }
+                let response = URLResponse(
+                    url: requestURL,
+                    mimeType: mimeType,
+                    expectedContentLength: expectedContentLength,
+                    textEncodingName: nil
+                )
+
+                await MainActor.run {
+                    task.didReceive(response)
+                }
+
+                if Task.isCancelled { return }
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+
+                while !Task.isCancelled {
+                    let chunk = try handle.read(upToCount: chunkSizeBytes) ?? Data()
+                    if chunk.isEmpty { break }
+                    await MainActor.run {
+                        task.didReceive(chunk)
+                    }
+                }
+
+                if Task.isCancelled { return }
+
+                await MainActor.run {
+                    task.didFinish()
+                }
+            } catch {
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    task.didFailWithError(error)
+                }
+            }
+
+            await MainActor.run { [weak self] in
+                if self?.activeWork[taskID]?.token == token {
+                    self?.activeWork[taskID] = nil
+                }
+            }
+        }
+
+        activeWork[taskID] = ActiveWork(token: token, task: work)
+    }
+
+    // MARK: - MIME Type Detection
+
+    private func mimeTypeForPath(_ path: String) -> String {
+        let ext = (path as NSString).pathExtension.lowercased()
+        switch ext {
+        case "html", "htm":
+            return "text/html"
+        case "js":
+            return "application/javascript"
+        case "css":
+            return "text/css"
+        case "json":
+            return "application/json"
+        case "gz":
+            return "application/gzip"
+        case "nii":
+            return "application/octet-stream"
+        case "wasm":
+            return "application/wasm"
+        case "png":
+            return "image/png"
+        case "jpg", "jpeg":
+            return "image/jpeg"
+        case "svg":
+            return "image/svg+xml"
+        default:
+            return "application/octet-stream"
+        }
+    }
+}

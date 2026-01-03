@@ -96,6 +96,11 @@ struct ContentView: View {
     @State private var decrementText = ""
     @State private var sliceTypeText = ""
 
+    /// Phase 2 Task 2: Check if we should load multiple volumes for UI testing
+    private var isUITestLoadMultiple: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-load-multiple")
+    }
+
     enum SliceTypes: Int, CaseIterable, Identifiable {
         case Axial = 0
         case Coronal = 1
@@ -577,29 +582,55 @@ struct ContentView: View {
 
                 loadingOverlay
                 hudOverlay
+
+                // Phase 2 Task 2: Volume count display (shown in UI test mode for verification)
+                if isUITestLoadMultiple {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Text("\(webViewManager.volumes.count)")
+                                .foregroundColor(.white)
+                                .padding(8)
+                                .background(Color.black.opacity(0.6))
+                                .cornerRadius(4)
+                                .accessibilityIdentifier("niivue.volumeCount")
+                                .padding()
+                        }
+                    }
+                }
             }
             .padding()
         }
         // Load sample image when webview becomes ready (Task 8: event-driven, Task 12: URL-based)
         .onChange(of: webViewManager.isReady) { newValue in
             if newValue {
-                // Load the demo image via URL-based loading (no base64 encoding)
                 Task {
                     do {
-                        // Use the custom scheme to load from bundled samples
-                        let sampleURL = "niivue://app/samples/T1w_DEMO.nii.gz"
-                        let fileName = "T1w_DEMO.nii.gz"
-                        try await webViewManager.loadImageFromUrl(url: sampleURL, fileName: fileName)
+                        // Phase 2 Task 2: UI test path loads multiple volumes
+                        if isUITestLoadMultiple {
+                            // Load same sample twice to get 2 volumes
+                            print("[ContentView] Loading 2 volumes for UI test")
+                            let sample1 = (url: "niivue://app/samples/T1w_DEMO.nii.gz", name: "T1w_DEMO.nii.gz")
+                            let sample2 = (url: "niivue://app/samples/T1w_DEMO.nii.gz", name: "T1w_DEMO_2.nii.gz")
+                            try await webViewManager.loadVolumesFromUrls([sample1, sample2])
+                            print("[ContentView] loadVolumesFromUrls returned, volumes.count = \(webViewManager.volumes.count)")
+                        } else {
+                            // Normal path: load single demo image
+                            let sampleURL = "niivue://app/samples/T1w_DEMO.nii.gz"
+                            let fileName = "T1w_DEMO.nii.gz"
+                            try await webViewManager.loadImageFromUrl(url: sampleURL, fileName: fileName)
 
-                        // Update UI state to show filename
-                        await MainActor.run {
-                            pickedDocumentURL = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples")
+                            // Update UI state to show filename
+                            await MainActor.run {
+                                pickedDocumentURL = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples")
+                            }
                         }
                     } catch {
                         print("Error loading sample image: \(error)")
 
                         // Fallback to base64 if URL-based fails (limited by maxBase64FallbackBytes)
-                        if let url = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples") {
+                        if !isUITestLoadMultiple, let url = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples") {
                             let encodedString = await Task.detached(priority: .userInitiated) {
                                 encodeFileToBase64(url: url)
                             }.value

@@ -14,6 +14,12 @@ declare global {
     loadBase64Image: (base64: string, fileName: string) => Promise<void>,
     // Task 10: URL-based loading (no base64)
     loadImageFromUrl: (url: string, fileName: string) => Promise<void>,
+    // Phase 2 Task 2: Multi-volume loading
+    loadVolumesFromUrls: (volumes: Array<{ url: string; name: string }>) => Promise<void>,
+    // Phase 2 Task 2: Get current volume count
+    getVolumeCount: () => number,
+    // Phase 2 Task 2: Get volume info list
+    getVolumeInfoList: () => string,
     // eslint-disable-next-line @typescript-eslint/ban-types
     setCrosshairColor: Function,
     // Task 5: saveDrawing is now async
@@ -129,6 +135,7 @@ function App() {
     nv.onLocationChange = onLocationChange;
     // Task 7.5: Volume notifications - notify Swift when images are loaded
     nv.onImageLoaded = (volume) => {
+      console.log('[NiiVue] onImageLoaded:', volume.id, volume.name)
       postToIOS('volumeLoaded', {
         id: volume.id,
         name: volume.name,
@@ -156,6 +163,29 @@ function App() {
     console.log(`Loading from URL: ${url}, fileName: ${fileName}`)
     nv.closeDrawing()
     await nv.loadVolumes([{ url, name: fileName }])
+  }
+
+  // Phase 2 Task 2: Multi-volume loading
+  async function loadVolumesFromUrls(volumes: Array<{ url: string; name: string }>) {
+    console.log(`Loading ${volumes.length} volumes`)
+    nv.closeDrawing()
+    await nv.loadVolumes(volumes)
+    console.log(`Loaded, now have ${nv.volumes.length} volumes`)
+  }
+
+  // Phase 2 Task 2: Get current volume count
+  function getVolumeCount(): number {
+    return nv.volumes.length
+  }
+
+  // Phase 2 Task 2: Get volume info list (for sync when callbacks don't work)
+  function getVolumeInfoList(): string {
+    const info = nv.volumes.map((v) => ({
+      id: v.id,
+      name: v.name,
+      nFrame4D: v.nFrame4D ?? 1
+    }))
+    return JSON.stringify(info)
   }
 
   function setCrosshairColor() {
@@ -192,6 +222,9 @@ function App() {
     setup();
     window.loadBase64Image = loadBase64Image
     window.loadImageFromUrl = loadImageFromUrl  // Task 10: URL-based loading
+    window.loadVolumesFromUrls = loadVolumesFromUrls  // Phase 2 Task 2: Multi-volume
+    window.getVolumeCount = getVolumeCount  // Phase 2 Task 2: Get volume count
+    window.getVolumeInfoList = getVolumeInfoList  // Phase 2 Task 2: Get volume info
     window.setCrosshairColor = setCrosshairColor
     window.saveDrawing = saveDrawing
     window.setSliceType = setSliceType

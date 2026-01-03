@@ -165,15 +165,21 @@ final class WebViewManager: NSObject, ObservableObject {
             timeoutTask?.cancel()
 
         case "volumeLoaded":
+            print("[WebViewManager] Received volumeLoaded message: \(body)")
             guard let jsonString = body as? String,
-                  let data = jsonString.data(using: .utf8) else { return }
+                  let data = jsonString.data(using: .utf8) else {
+                print("[WebViewManager] Failed to get string from body")
+                return
+            }
             do {
                 let volumeInfo = try JSONDecoder().decode(VolumeInfo.self, from: data)
                 // Update or append volume
                 if let index = volumes.firstIndex(where: { $0.id == volumeInfo.id }) {
                     volumes[index] = volumeInfo
+                    print("[WebViewManager] Updated volume: \(volumeInfo.name), total: \(volumes.count)")
                 } else {
                     volumes.append(volumeInfo)
+                    print("[WebViewManager] Appended volume: \(volumeInfo.name), total: \(volumes.count)")
                 }
             } catch {
                 print("[WebViewManager] Failed to decode volumeLoaded: \(error)")
@@ -233,6 +239,46 @@ final class WebViewManager: NSObject, ObservableObject {
         let urlEscaped = try JavaScriptQuote.jsonStringLiteral(url)
         let nameEscaped = try JavaScriptQuote.jsonStringLiteral(fileName)
         _ = try await evaluator.callAsyncString("return await window.loadImageFromUrl(\(urlEscaped), \(nameEscaped))")
+    }
+
+    /// Loads multiple volumes from URLs (Phase 2 Task 2: multi-volume overlays).
+    /// - Parameter volumeSpecs: Array of (url, name) pairs for volumes to load
+    func loadVolumesFromUrls(_ volumeSpecs: [(url: String, name: String)]) async throws {
+        lastErrorMessage = nil
+        volumes.removeAll()
+
+        // Build JSON array string
+        let volumeArray = try volumeSpecs.map { spec -> String in
+            let urlEscaped = try JavaScriptQuote.jsonStringLiteral(spec.url)
+            let nameEscaped = try JavaScriptQuote.jsonStringLiteral(spec.name)
+            return "{\"url\":\(urlEscaped),\"name\":\(nameEscaped)}"
+        }
+        let jsonArray = "[\(volumeArray.joined(separator: ","))]"
+
+        _ = try await evaluator.callAsyncString("return await window.loadVolumesFromUrls(\(jsonArray))")
+
+        // Query Niivue's volume count to update our tracking
+        // (onImageLoaded callbacks may be deferred)
+        try await syncVolumeCount()
+    }
+
+    /// Syncs the volume list from Niivue JS to Swift.
+    /// This is a workaround for cases where onImageLoaded callbacks don't arrive.
+    private func syncVolumeCount() async throws {
+        // Use callAsyncString which properly handles the return value
+        guard let jsonString = try await evaluator.callAsyncString("return window.getVolumeInfoList()"),
+              let data = jsonString.data(using: .utf8) else {
+            print("[WebViewManager] Failed to get volume info from Niivue")
+            return
+        }
+
+        do {
+            let volumeInfos = try JSONDecoder().decode([VolumeInfo].self, from: data)
+            print("[WebViewManager] Niivue reports \(volumeInfos.count) volumes, we had \(volumes.count)")
+            volumes = volumeInfos
+        } catch {
+            print("[WebViewManager] Failed to decode volume info: \(error)")
+        }
     }
 
     // MARK: - View Controls
