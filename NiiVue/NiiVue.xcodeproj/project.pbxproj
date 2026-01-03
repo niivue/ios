@@ -34,10 +34,12 @@
 		D1E2F3A401234567ABCDEF03 /* NiivueURLSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E2F3A401234567ABCDEF04 /* NiivueURLSchemeHandler.swift */; };
 		D1E2F3A401234567ABCDEF05 /* NiivueURLRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E2F3A401234567ABCDEF06 /* NiivueURLRouterTests.swift */; };
 		E1F2A3B401234567ABCDEF01 /* ImportedFileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */; };
+		K1L2M3N401234567ABCDEF01 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = K1L2M3N401234567ABCDEF02 /* SessionStore.swift */; };
 		F1A2B3C401234567ABCDEF01 /* HUDMessageParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */; };
 		G1H2I3J401234567ABCDEF01 /* OverlayCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */; };
 		H1I2J3K401234567ABCDEF01 /* TimeSeriesCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */; };
 		I1J2K3L401234567ABCDEF01 /* SegmentationCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = I1J2K3L401234567ABCDEF02 /* SegmentationCommandTests.swift */; };
+		J1K2L3M401234567ABCDEF01 /* SessionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = J1K2L3M401234567ABCDEF02 /* SessionStoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -105,10 +107,12 @@
 		D1E2F3A401234567ABCDEF04 /* NiivueURLSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiivueURLSchemeHandler.swift; sourceTree = "<group>"; };
 		D1E2F3A401234567ABCDEF06 /* NiivueURLRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiivueURLRouterTests.swift; sourceTree = "<group>"; };
 		E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedFileStore.swift; sourceTree = "<group>"; };
+		K1L2M3N401234567ABCDEF02 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
 		F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HUDMessageParsingTests.swift; sourceTree = "<group>"; };
 		G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayCommandTests.swift; sourceTree = "<group>"; };
 		H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeSeriesCommandTests.swift; sourceTree = "<group>"; };
 		I1J2K3L401234567ABCDEF02 /* SegmentationCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentationCommandTests.swift; sourceTree = "<group>"; };
+		J1K2L3M401234567ABCDEF02 /* SessionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -198,6 +202,7 @@
 				G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */,
 				H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */,
 				I1J2K3L401234567ABCDEF02 /* SegmentationCommandTests.swift */,
+				J1K2L3M401234567ABCDEF02 /* SessionStoreTests.swift */,
 			);
 			path = NiiVueTests;
 			sourceTree = "<group>";
@@ -231,6 +236,7 @@
 				B1C2D3E401234567ABCDEF02 /* DrawingExportService.swift */,
 				C1D2E3F401234567ABCDEF02 /* FileImportService.swift */,
 				E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */,
+				K1L2M3N401234567ABCDEF02 /* SessionStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -399,6 +405,7 @@
 				D1E2F3A401234567ABCDEF01 /* NiivueURLRouter.swift in Sources */,
 				D1E2F3A401234567ABCDEF03 /* NiivueURLSchemeHandler.swift in Sources */,
 				E1F2A3B401234567ABCDEF01 /* ImportedFileStore.swift in Sources */,
+				K1L2M3N401234567ABCDEF01 /* SessionStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -419,6 +426,7 @@
 				G1H2I3J401234567ABCDEF01 /* OverlayCommandTests.swift in Sources */,
 				H1I2J3K401234567ABCDEF01 /* TimeSeriesCommandTests.swift in Sources */,
 				I1J2K3L401234567ABCDEF01 /* SegmentationCommandTests.swift in Sources */,
+				J1K2L3M401234567ABCDEF01 /* SessionStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
