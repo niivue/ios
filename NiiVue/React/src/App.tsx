@@ -6,14 +6,18 @@ import SpeedDial from '@mui/material/SpeedDial';
 import DragModeIcon from '@mui/icons-material/AdsClick'; // speed dial icon
 import ViewModeIcon from '@mui/icons-material/GridView'; // view mode speed dial icon
 import './App.css'
+// Task 7 & 7.5: iOS messaging bridge
+import { postToIOS } from './bridge/iosMessaging'
 
 declare global {
   interface Window {
-    loadBase64Image: (base64: string, fileName: string) => void,
+    loadBase64Image: (base64: string, fileName: string) => Promise<void>,
+    // Task 10: URL-based loading (no base64)
+    loadImageFromUrl: (url: string, fileName: string) => Promise<void>,
     // eslint-disable-next-line @typescript-eslint/ban-types
     setCrosshairColor: Function,
-    // eslint-disable-next-line @typescript-eslint/ban-types
-    saveDrawing: Function,
+    // Task 5: saveDrawing is now async
+    saveDrawing: () => Promise<string>,
     // eslint-disable-next-line @typescript-eslint/ban-types
     setSliceType: Function,
     // eslint-disable-next-line @typescript-eslint/ban-types
@@ -113,7 +117,8 @@ function App() {
   }
 
   function onLocationChange(location) {
-    window.webkit.messageHandlers.locationChange.postMessage(JSON.stringify(location.mm));
+    // Phase 2 Task 1: Send full location info for HUD display
+    postToIOS('locationChange', { string: location.string, mm: location.mm, values: location.values })
   }
 
   const setup = async () => {
@@ -122,50 +127,71 @@ function App() {
     }
     await nv.attachToCanvas(canvasRef.current);
     nv.onLocationChange = onLocationChange;
-    // await nv.loadVolumes([
-    //   {url: 'https://niivue.github.io/niivue-demo-images/chris_t2.nii.gz'},
-    // ])
+    // Task 7.5: Volume notifications - notify Swift when images are loaded
+    nv.onImageLoaded = (volume) => {
+      postToIOS('volumeLoaded', {
+        id: volume.id,
+        name: volume.name,
+        nFrame4D: volume.nFrame4D ?? 1
+      })
+    }
+    // Task 7: Notify Swift that the web view is ready for commands
+    postToIOS('finishedLoading', { ready: true })
   };
 
   async function loadBase64Image(base64: string, fileName: string) {
     console.log(fileName)
     // name is required for the image to be loaded (file type inferred correctly),
     // but it is not used elsewhere
-    const nvimage = NVImage.loadFromBase64({base64:base64, name: fileName})
+    // NVImage.loadFromBase64 is async in Niivue 0.66.0+
+    const nvimage = await NVImage.loadFromBase64({base64:base64, name: fileName})
     nv.closeDrawing()
     nv.volumes = []
     nv.updateGLVolume()
     nv.addVolume(nvimage)
   }
 
+  // Task 10: URL-based loading (no base64 encoding needed)
+  async function loadImageFromUrl(url: string, fileName: string) {
+    console.log(`Loading from URL: ${url}, fileName: ${fileName}`)
+    nv.closeDrawing()
+    await nv.loadVolumes([{ url, name: fileName }])
+  }
+
   function setCrosshairColor() {
     nv.setCrosshairColor([0,1,0,0.5])
   }
 
-  function saveDrawing() {
-    function uint8ArrayToBase64(buffer: Uint8Array) {
+  // Task 5: Truly async saveDrawing
+  async function saveDrawing(): Promise<string> {
+    function uint8ArrayToBase64(buffer: Uint8Array): string {
       let binary = '';
-      // const bytes = new Uint8Array(buffer);
       const bytes = buffer;
       const len = bytes.byteLength;
-      
+
       for (let i = 0; i < len; i++) {
-          binary += String.fromCharCode(bytes[i]);
+        binary += String.fromCharCode(bytes[i]);
       }
-      
+
       return btoa(binary);
-  }
-    const img = nv.saveImage({ filename: 'niivue_drawing.nii.gz', isSaveDrawing: true, volumeByIndex: 0 })
-    // if img is a Uint8Array, convert to base64
-    if (img instanceof Uint8Array){
-      return uint8ArrayToBase64(img)
     }
-    return ""
+
+    // Use await to properly handle the async saveImage call
+    const img = await nv.saveImage({ filename: 'niivue_drawing.nii.gz', isSaveDrawing: true, volumeByIndex: 0 });
+
+    // If img is a Uint8Array, convert to base64
+    if (img instanceof Uint8Array) {
+      return uint8ArrayToBase64(img);
+    }
+
+    // If no drawing exists, throw an error so Swift gets a deterministic failure
+    throw new Error('No drawing to save');
   }
 
   React.useEffect(() => {
     setup();
-    window.loadBase64Image = loadBase64Image 
+    window.loadBase64Image = loadBase64Image
+    window.loadImageFromUrl = loadImageFromUrl  // Task 10: URL-based loading
     window.setCrosshairColor = setCrosshairColor
     window.saveDrawing = saveDrawing
     window.setSliceType = setSliceType
@@ -178,8 +204,7 @@ function App() {
     window.setOrientationCube = setOrientationCube
     window.setRadiological = setRadiological
     window.moveCrosshairInVox = moveCrosshairInVox
-    console.log("sending message")
-    window.webkit.messageHandlers.updateUI.postMessage("updateUI xxx");
+    // Note: finishedLoading is now called in setup() after canvas attachment
   }, []);
 
   return (
