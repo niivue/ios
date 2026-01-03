@@ -8,6 +8,8 @@ import ViewModeIcon from '@mui/icons-material/GridView'; // view mode speed dial
 import './App.css'
 // Task 7 & 7.5: iOS messaging bridge
 import { postToIOS } from './bridge/iosMessaging'
+// Phase 2 Task 3: Volume colormap/opacity commands
+import { setColormap as nvSetColormap, setOpacity as nvSetOpacity, listColormaps as nvListColormaps } from './bridge/volumeCommands'
 
 declare global {
   interface Window {
@@ -20,6 +22,10 @@ declare global {
     getVolumeCount: () => number,
     // Phase 2 Task 2: Get volume info list
     getVolumeInfoList: () => string,
+    // Phase 2 Task 3: Colormap and opacity controls
+    setColormap: (volumeIndex: number, colormap: string) => void,
+    setOpacity: (volumeIndex: number, opacity: number) => void,
+    listColormaps: () => string[],
     // eslint-disable-next-line @typescript-eslint/ban-types
     setCrosshairColor: Function,
     // Task 5: saveDrawing is now async
@@ -188,6 +194,19 @@ function App() {
     return JSON.stringify(info)
   }
 
+  // Phase 2 Task 3: Colormap and opacity controls
+  function setColormap(volumeIndex: number, colormap: string): void {
+    nvSetColormap(nv, volumeIndex, colormap)
+  }
+
+  function setOpacity(volumeIndex: number, opacity: number): void {
+    nvSetOpacity(nv, volumeIndex, opacity)
+  }
+
+  function listColormaps(): string[] {
+    return nvListColormaps(nv)
+  }
+
   function setCrosshairColor() {
     nv.setCrosshairColor([0,1,0,0.5])
   }
@@ -225,6 +244,9 @@ function App() {
     window.loadVolumesFromUrls = loadVolumesFromUrls  // Phase 2 Task 2: Multi-volume
     window.getVolumeCount = getVolumeCount  // Phase 2 Task 2: Get volume count
     window.getVolumeInfoList = getVolumeInfoList  // Phase 2 Task 2: Get volume info
+    window.setColormap = setColormap  // Phase 2 Task 3: Colormap control
+    window.setOpacity = setOpacity  // Phase 2 Task 3: Opacity control
+    window.listColormaps = listColormaps  // Phase 2 Task 3: List available colormaps
     window.setCrosshairColor = setCrosshairColor
     window.saveDrawing = saveDrawing
     window.setSliceType = setSliceType

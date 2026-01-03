@@ -281,6 +281,35 @@ final class WebViewManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Overlay Controls (Phase 2 Task 3)
+
+    /// Sets the colormap for a volume by index.
+    /// - Parameters:
+    ///   - volumeIndex: Index of the volume in nv.volumes
+    ///   - colormap: Name of the colormap (e.g., "gray", "hot", "red")
+    func setColormap(volumeIndex: Int, colormap: String) async throws {
+        let colormapEscaped = try JavaScriptQuote.jsonStringLiteral(colormap)
+        try await evaluator.evaluateCommand("window.setColormap(\(volumeIndex), \(colormapEscaped))")
+    }
+
+    /// Sets the opacity for a volume by index.
+    /// - Parameters:
+    ///   - volumeIndex: Index of the volume in nv.volumes
+    ///   - opacity: Opacity value (0.0 to 1.0)
+    func setOpacity(volumeIndex: Int, opacity: Double) async throws {
+        try await evaluator.evaluateCommand("window.setOpacity(\(volumeIndex), \(opacity))")
+    }
+
+    /// Gets the list of available colormaps.
+    /// - Returns: Array of colormap names
+    func listColormaps() async throws -> [String] {
+        guard let jsonString = try await evaluator.evaluateString("return JSON.stringify(window.listColormaps())"),
+              let data = jsonString.data(using: .utf8) else {
+            return []
+        }
+        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+    }
+
     // MARK: - View Controls
 
     /// Sets the slice type (0=Axial, 1=Coronal, 2=Sagittal, 3=Multiplanar, 4=Render).
