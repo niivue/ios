@@ -36,6 +36,7 @@
 		E1F2A3B401234567ABCDEF01 /* ImportedFileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */; };
 		F1A2B3C401234567ABCDEF01 /* HUDMessageParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */; };
 		G1H2I3J401234567ABCDEF01 /* OverlayCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */; };
+		H1I2J3K401234567ABCDEF01 /* TimeSeriesCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -105,6 +106,7 @@
 		E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedFileStore.swift; sourceTree = "<group>"; };
 		F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HUDMessageParsingTests.swift; sourceTree = "<group>"; };
 		G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayCommandTests.swift; sourceTree = "<group>"; };
+		H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeSeriesCommandTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -192,6 +194,7 @@
 				D1E2F3A401234567ABCDEF06 /* NiivueURLRouterTests.swift */,
 				F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */,
 				G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */,
+				H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */,
 			);
 			path = NiiVueTests;
 			sourceTree = "<group>";
@@ -411,6 +414,7 @@
 				D1E2F3A401234567ABCDEF05 /* NiivueURLRouterTests.swift in Sources */,
 				F1A2B3C401234567ABCDEF01 /* HUDMessageParsingTests.swift in Sources */,
 				G1H2I3J401234567ABCDEF01 /* OverlayCommandTests.swift in Sources */,
+				H1I2J3K401234567ABCDEF01 /* TimeSeriesCommandTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

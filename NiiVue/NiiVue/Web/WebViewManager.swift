@@ -281,7 +281,7 @@ final class WebViewManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Overlay Controls (Phase 2 Task 3)
+    // MARK: - Overlay Controls (Phase 2 Task 3) & 4D Time-Series (Phase 2 Task 4)
 
     /// Sets the colormap for a volume by index.
     /// - Parameters:
@@ -308,6 +308,14 @@ final class WebViewManager: NSObject, ObservableObject {
             return []
         }
         return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+    }
+
+    /// Phase 2 Task 4: Sets the 4D frame for a volume by index.
+    /// - Parameters:
+    ///   - volumeIndex: Index of the volume in nv.volumes
+    ///   - frame: Frame number to display (0-indexed)
+    func setFrame4D(volumeIndex: Int, frame: Int) async throws {
+        try await evaluator.evaluateCommand("window.setFrame4D(\(volumeIndex), \(frame))")
     }
 
     // MARK: - View Controls

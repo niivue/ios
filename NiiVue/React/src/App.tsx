@@ -8,8 +8,8 @@ import ViewModeIcon from '@mui/icons-material/GridView'; // view mode speed dial
 import './App.css'
 // Task 7 & 7.5: iOS messaging bridge
 import { postToIOS } from './bridge/iosMessaging'
-// Phase 2 Task 3: Volume colormap/opacity commands
-import { setColormap as nvSetColormap, setOpacity as nvSetOpacity, listColormaps as nvListColormaps } from './bridge/volumeCommands'
+// Phase 2 Task 3 & 4: Volume colormap/opacity/frame commands
+import { setColormap as nvSetColormap, setOpacity as nvSetOpacity, listColormaps as nvListColormaps, setFrame4D as nvSetFrame4D } from './bridge/volumeCommands'
 
 declare global {
   interface Window {
@@ -26,6 +26,8 @@ declare global {
     setColormap: (volumeIndex: number, colormap: string) => void,
     setOpacity: (volumeIndex: number, opacity: number) => void,
     listColormaps: () => string[],
+    // Phase 2 Task 4: 4D time-series control
+    setFrame4D: (volumeIndex: number, frame: number) => void,
     // eslint-disable-next-line @typescript-eslint/ban-types
     setCrosshairColor: Function,
     // Task 5: saveDrawing is now async
@@ -207,6 +209,11 @@ function App() {
     return nvListColormaps(nv)
   }
 
+  // Phase 2 Task 4: 4D time-series control
+  function setFrame4D(volumeIndex: number, frame: number): void {
+    nvSetFrame4D(nv, volumeIndex, frame)
+  }
+
   function setCrosshairColor() {
     nv.setCrosshairColor([0,1,0,0.5])
   }
@@ -247,6 +254,7 @@ function App() {
     window.setColormap = setColormap  // Phase 2 Task 3: Colormap control
     window.setOpacity = setOpacity  // Phase 2 Task 3: Opacity control
     window.listColormaps = listColormaps  // Phase 2 Task 3: List available colormaps
+    window.setFrame4D = setFrame4D  // Phase 2 Task 4: 4D frame control
     window.setCrosshairColor = setCrosshairColor
     window.saveDrawing = saveDrawing
     window.setSliceType = setSliceType
