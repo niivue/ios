@@ -37,6 +37,7 @@
 		F1A2B3C401234567ABCDEF01 /* HUDMessageParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */; };
 		G1H2I3J401234567ABCDEF01 /* OverlayCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */; };
 		H1I2J3K401234567ABCDEF01 /* TimeSeriesCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */; };
+		I1J2K3L401234567ABCDEF01 /* SegmentationCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = I1J2K3L401234567ABCDEF02 /* SegmentationCommandTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -107,6 +108,7 @@
 		F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HUDMessageParsingTests.swift; sourceTree = "<group>"; };
 		G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayCommandTests.swift; sourceTree = "<group>"; };
 		H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeSeriesCommandTests.swift; sourceTree = "<group>"; };
+		I1J2K3L401234567ABCDEF02 /* SegmentationCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentationCommandTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -195,6 +197,7 @@
 				F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */,
 				G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */,
 				H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */,
+				I1J2K3L401234567ABCDEF02 /* SegmentationCommandTests.swift */,
 			);
 			path = NiiVueTests;
 			sourceTree = "<group>";
@@ -415,6 +418,7 @@
 				F1A2B3C401234567ABCDEF01 /* HUDMessageParsingTests.swift in Sources */,
 				G1H2I3J401234567ABCDEF01 /* OverlayCommandTests.swift in Sources */,
 				H1I2J3K401234567ABCDEF01 /* TimeSeriesCommandTests.swift in Sources */,
+				I1J2K3L401234567ABCDEF01 /* SegmentationCommandTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -56,3 +56,40 @@ export function setFrame4D(nv: Niivue, volumeIndex: number, frame: number): void
   }
   nv.setFrame4D(volume.id, frame)
 }
+
+// Phase 2 Task 5: Segmentation/Draw Tooling Pack
+
+/**
+ * Undo the last drawing operation
+ * @param nv - The Niivue instance
+ */
+export function drawUndo(nv: Niivue): void {
+  nv.drawUndo()
+}
+
+/**
+ * Set the opacity for drawings
+ * @param nv - The Niivue instance
+ * @param opacity - Opacity value (0.0 to 1.0)
+ */
+export function setDrawOpacity(nv: Niivue, opacity: number): void {
+  nv.setDrawOpacity(opacity)
+}
+
+/**
+ * Set the colormap for drawings
+ * @param nv - The Niivue instance
+ * @param colormap - Name of the colormap
+ */
+export function setDrawColormap(nv: Niivue, colormap: string): void {
+  nv.setDrawColormap(colormap)
+}
+
+/**
+ * Enable or disable click-to-segment mode
+ * @param nv - The Niivue instance
+ * @param enabled - Whether click-to-segment is enabled
+ */
+export function setClickToSegmentEnabled(nv: Niivue, enabled: boolean): void {
+  nv.opts.clickToSegment = enabled
+}

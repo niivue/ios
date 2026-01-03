@@ -318,6 +318,32 @@ final class WebViewManager: NSObject, ObservableObject {
         try await evaluator.evaluateCommand("window.setFrame4D(\(volumeIndex), \(frame))")
     }
 
+    // MARK: - Segmentation/Draw Tooling (Phase 2 Task 5)
+
+    /// Undoes the last drawing operation.
+    func drawUndo() async throws {
+        try await evaluator.evaluateCommand("window.drawUndo()")
+    }
+
+    /// Sets the opacity for drawings.
+    /// - Parameter opacity: Opacity value (0.0 to 1.0)
+    func setDrawOpacity(opacity: Double) async throws {
+        try await evaluator.evaluateCommand("window.setDrawOpacity(\(opacity))")
+    }
+
+    /// Sets the colormap for drawings.
+    /// - Parameter colormap: Name of the colormap
+    func setDrawColormap(colormap: String) async throws {
+        let colormapEscaped = try JavaScriptQuote.jsonStringLiteral(colormap)
+        try await evaluator.evaluateCommand("window.setDrawColormap(\(colormapEscaped))")
+    }
+
+    /// Enables or disables click-to-segment mode.
+    /// - Parameter enabled: Whether click-to-segment is enabled
+    func setClickToSegmentEnabled(enabled: Bool) async throws {
+        try await evaluator.evaluateCommand("window.setClickToSegmentEnabled(\(enabled))")
+    }
+
     // MARK: - View Controls
 
     /// Sets the slice type (0=Axial, 1=Coronal, 2=Sagittal, 3=Multiplanar, 4=Render).

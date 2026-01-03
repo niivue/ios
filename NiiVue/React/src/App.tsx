@@ -8,8 +8,17 @@ import ViewModeIcon from '@mui/icons-material/GridView'; // view mode speed dial
 import './App.css'
 // Task 7 & 7.5: iOS messaging bridge
 import { postToIOS } from './bridge/iosMessaging'
-// Phase 2 Task 3 & 4: Volume colormap/opacity/frame commands
-import { setColormap as nvSetColormap, setOpacity as nvSetOpacity, listColormaps as nvListColormaps, setFrame4D as nvSetFrame4D } from './bridge/volumeCommands'
+// Phase 2 Task 3, 4, 5: Volume colormap/opacity/frame/drawing commands
+import {
+  setColormap as nvSetColormap,
+  setOpacity as nvSetOpacity,
+  listColormaps as nvListColormaps,
+  setFrame4D as nvSetFrame4D,
+  drawUndo as nvDrawUndo,
+  setDrawOpacity as nvSetDrawOpacity,
+  setDrawColormap as nvSetDrawColormap,
+  setClickToSegmentEnabled as nvSetClickToSegmentEnabled
+} from './bridge/volumeCommands'
 
 declare global {
   interface Window {
@@ -28,6 +37,11 @@ declare global {
     listColormaps: () => string[],
     // Phase 2 Task 4: 4D time-series control
     setFrame4D: (volumeIndex: number, frame: number) => void,
+    // Phase 2 Task 5: Segmentation/Drawing commands
+    drawUndo: () => void,
+    setDrawOpacity: (opacity: number) => void,
+    setDrawColormap: (colormap: string) => void,
+    setClickToSegmentEnabled: (enabled: boolean) => void,
     // eslint-disable-next-line @typescript-eslint/ban-types
     setCrosshairColor: Function,
     // Task 5: saveDrawing is now async
@@ -214,6 +228,23 @@ function App() {
     nvSetFrame4D(nv, volumeIndex, frame)
   }
 
+  // Phase 2 Task 5: Segmentation/Drawing commands
+  function drawUndo(): void {
+    nvDrawUndo(nv)
+  }
+
+  function setDrawOpacity(opacity: number): void {
+    nvSetDrawOpacity(nv, opacity)
+  }
+
+  function setDrawColormap(colormap: string): void {
+    nvSetDrawColormap(nv, colormap)
+  }
+
+  function setClickToSegmentEnabled(enabled: boolean): void {
+    nvSetClickToSegmentEnabled(nv, enabled)
+  }
+
   function setCrosshairColor() {
     nv.setCrosshairColor([0,1,0,0.5])
   }
@@ -255,6 +286,10 @@ function App() {
     window.setOpacity = setOpacity  // Phase 2 Task 3: Opacity control
     window.listColormaps = listColormaps  // Phase 2 Task 3: List available colormaps
     window.setFrame4D = setFrame4D  // Phase 2 Task 4: 4D frame control
+    window.drawUndo = drawUndo  // Phase 2 Task 5: Draw undo
+    window.setDrawOpacity = setDrawOpacity  // Phase 2 Task 5: Draw opacity
+    window.setDrawColormap = setDrawColormap  // Phase 2 Task 5: Draw colormap
+    window.setClickToSegmentEnabled = setClickToSegmentEnabled  // Phase 2 Task 5: Click-to-segment
     window.setCrosshairColor = setCrosshairColor
     window.saveDrawing = saveDrawing
     window.setSliceType = setSliceType
