@@ -232,4 +232,15 @@ final class NiiVueUITests: XCTestCase {
 
         app.buttons["Done"].tap()
     }
+
+    /// Phase 2 Task 9: Verify DICOM import button exists in Segmentation sheet
+    func testSegmentationSheetShowsDicomImportButton() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        app.buttons["niivue.segmentation"].tap()
+        XCTAssertTrue(app.otherElements["niivue.segmentationSheet"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["niivue.importDicom"].exists)
+        app.buttons["Done"].tap()
+    }
 }

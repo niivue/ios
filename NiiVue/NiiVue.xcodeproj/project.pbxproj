@@ -45,6 +45,7 @@
 		N1O2P3Q401234567ABCDEF01 /* Base64FileEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = N1O2P3Q401234567ABCDEF02 /* Base64FileEncoderTests.swift */; };
 		O1P2Q3R401234567ABCDEF01 /* DicomSeriesStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = O1P2Q3R401234567ABCDEF02 /* DicomSeriesStoreTests.swift */; };
 		P1Q2R3S401234567ABCDEF01 /* DicomSeriesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */; };
+		Q1R2S3T401234567ABCDEF01 /* DicomCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = Q1R2S3T401234567ABCDEF02 /* DicomCommandTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -123,6 +124,7 @@
 		N1O2P3Q401234567ABCDEF02 /* Base64FileEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Base64FileEncoderTests.swift; sourceTree = "<group>"; };
 		O1P2Q3R401234567ABCDEF02 /* DicomSeriesStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomSeriesStoreTests.swift; sourceTree = "<group>"; };
 		P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomSeriesStore.swift; sourceTree = "<group>"; };
+		Q1R2S3T401234567ABCDEF02 /* DicomCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomCommandTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -215,6 +217,7 @@
 				I1J2K3L401234567ABCDEF02 /* SegmentationCommandTests.swift */,
 				J1K2L3M401234567ABCDEF02 /* SessionStoreTests.swift */,
 				O1P2Q3R401234567ABCDEF02 /* DicomSeriesStoreTests.swift */,
+				Q1R2S3T401234567ABCDEF02 /* DicomCommandTests.swift */,
 			);
 			path = NiiVueTests;
 			sourceTree = "<group>";
@@ -447,6 +450,7 @@
 				I1J2K3L401234567ABCDEF01 /* SegmentationCommandTests.swift in Sources */,
 				J1K2L3M401234567ABCDEF01 /* SessionStoreTests.swift in Sources */,
 				O1P2Q3R401234567ABCDEF01 /* DicomSeriesStoreTests.swift in Sources */,
+				Q1R2S3T401234567ABCDEF01 /* DicomCommandTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

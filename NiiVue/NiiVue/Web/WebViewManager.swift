@@ -49,7 +49,8 @@ final class WebViewManager: NSObject, ObservableObject {
     // MARK: - URL Scheme Handler (Task 11)
 
     /// The URL scheme handler for serving files via niivue://
-    private var urlSchemeHandler: NiivueURLSchemeHandler!
+    /// Internal access allows ContentView to set dicomSeriesStore for Phase 2 Task 9.
+    var urlSchemeHandler: NiivueURLSchemeHandler!
 
     /// The imported file store for resolving file IDs to URLs
     var importedFileStore: ImportedFileStore!
@@ -427,6 +428,16 @@ final class WebViewManager: NSObject, ObservableObject {
     /// - Parameter enabled: Whether click-to-segment is enabled
     func setClickToSegmentEnabled(enabled: Bool) async throws {
         try await evaluator.evaluateCommand("window.setClickToSegmentEnabled(\(enabled))")
+    }
+
+    // MARK: - DICOM Import (Phase 2 Task 9)
+
+    /// Loads a DICOM series from a manifest URL.
+    /// The manifest is a text file containing one DICOM filename per line.
+    /// - Parameter manifestUrl: The manifest URL (e.g., niivue://app/dicom/series1/niivue-manifest.txt)
+    func loadDicomSeriesFromManifestURL(_ manifestUrl: String) async throws {
+        let urlEscaped = try JavaScriptQuote.jsonStringLiteral(manifestUrl)
+        try await evaluator.evaluateCommand("window.loadDicomSeriesFromManifest(\(urlEscaped))")
     }
 
     // MARK: - View Controls

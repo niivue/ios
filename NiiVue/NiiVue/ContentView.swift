@@ -230,6 +230,12 @@ struct ContentView: View {
     @State private var volumeFrame4DByID: [String: Int] = [:]
     @State private var segmentationSheetPresented = false
     @State private var segmentationToolStatusMessage: String?
+
+    // Phase 2 Task 9: DICOM import
+    @State private var dicomPickerPresented = false
+    @State private var dicomImportInProgress = false
+    @State private var dicomImportStatusMessage: String?
+    private let dicomSeriesStore = DicomSeriesStore()
     @State private var drawOpacity: Double = 1.0
     @State private var drawColormap: String = "gray"
     @State private var clickToSegmentEnabled = false
@@ -369,6 +375,86 @@ struct ContentView: View {
 
             await MainActor.run {
                 segmentationImportStatusMessage = summary
+            }
+        }
+    }
+
+    // MARK: - Phase 2 Task 9: DICOM import
+
+    private func importDicomSeries(from pickedURLs: [URL]) {
+        Task {
+            await MainActor.run {
+                dicomImportInProgress = true
+                dicomImportStatusMessage = "Importing \(pickedURLs.count) DICOM file(s)…"
+            }
+
+            defer {
+                Task { @MainActor in
+                    dicomImportInProgress = false
+                }
+            }
+
+            // Filter to DICOM files (.dcm, .dicom, or files without extension)
+            let dicomURLs = pickedURLs.filter { url in
+                let ext = url.pathExtension.lowercased()
+                return ext == "dcm" || ext == "dicom" || ext.isEmpty
+            }
+
+            guard !dicomURLs.isEmpty else {
+                await MainActor.run {
+                    dicomImportStatusMessage = "No DICOM files found in selection."
+                }
+                return
+            }
+
+            let libraryDir = FileImportService.defaultLibraryDirectory()
+            do {
+                try FileManager.default.createDirectory(at: libraryDir, withIntermediateDirectories: true)
+            } catch {
+                await MainActor.run {
+                    dicomImportStatusMessage = "Failed to create Library directory: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            let fileImportService = FileImportService()
+            var importedFileURLs: [URL] = []
+            var failedImports: [String] = []
+
+            for url in dicomURLs {
+                do {
+                    let imported = try await fileImportService.importDocument(at: url, destinationDirectory: libraryDir)
+                    await webViewManager.importedFileStore.register(importedFile: imported)
+                    importedFileURLs.append(imported.localURL)
+                } catch {
+                    failedImports.append(url.lastPathComponent)
+                }
+            }
+
+            guard !importedFileURLs.isEmpty else {
+                await MainActor.run {
+                    dicomImportStatusMessage = "Failed to import any DICOM files."
+                }
+                return
+            }
+
+            // Register the series with DicomSeriesStore
+            let seriesId = await dicomSeriesStore.register(files: importedFileURLs)
+
+            // Set the store on the URL scheme handler
+            webViewManager.urlSchemeHandler.dicomSeriesStore = dicomSeriesStore
+
+            // Load the DICOM series via manifest
+            let manifestURL = "niivue://app/dicom/\(seriesId)/niivue-manifest.txt"
+            do {
+                try await webViewManager.loadDicomSeriesFromManifestURL(manifestURL)
+                await MainActor.run {
+                    dicomImportStatusMessage = "Loaded \(importedFileURLs.count) DICOM file(s)."
+                }
+            } catch {
+                await MainActor.run {
+                    dicomImportStatusMessage = "Failed to load DICOM series: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -1087,6 +1173,25 @@ struct ContentView: View {
                                     .accessibilityIdentifier("niivue.importSegmentationAssets")
                                     .disabled(segmentationImportInProgress)
 
+                                    Button("Import DICOM Series") {
+                                        dicomPickerPresented = true
+                                    }
+                                    .accessibilityIdentifier("niivue.importDicom")
+                                    .disabled(dicomImportInProgress)
+
+                                    if dicomImportInProgress {
+                                        ProgressView("Importing DICOM...")
+                                            .accessibilityIdentifier("niivue.dicomImportProgress")
+                                    }
+
+                                    if let message = dicomImportStatusMessage {
+                                        Text(message)
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .multilineTextAlignment(.leading)
+                                            .accessibilityIdentifier("niivue.dicomImportStatus")
+                                    }
+
                                     if segmentationImportInProgress {
                                         ProgressView()
                                             .accessibilityIdentifier("niivue.segmentationImportProgress")
@@ -1171,6 +1276,11 @@ struct ContentView: View {
                     .sheet(isPresented: $segmentationAssetsPickerPresented) {
                         DocumentPickerMultiple(presented: $segmentationAssetsPickerPresented) { urls in
                             importSegmentationAssets(from: urls)
+                        }
+                    }
+                    .sheet(isPresented: $dicomPickerPresented) {
+                        DocumentPickerMultiple(presented: $dicomPickerPresented) { urls in
+                            importDicomSeries(from: urls)
                         }
                     }
                 }
