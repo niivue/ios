@@ -23,6 +23,9 @@ import {
   exportViewerState as nvExportViewerState,
   applyViewerState as nvApplyViewerState
 } from './bridge/volumeCommands'
+// Phase 2 Task 7: DICOM loader and bridge
+import { dicomLoader } from '@niivue/dicom-loader'
+import { loadDicomSeriesFromManifest as nvLoadDicomSeriesFromManifest } from './bridge/dicomBridge'
 
 declare global {
   interface Window {
@@ -54,6 +57,8 @@ declare global {
     setDrawOpacity: (opacity: number) => void,
     setDrawColormap: (colormap: string) => void,
     setClickToSegmentEnabled: (enabled: boolean) => void,
+    // Phase 2 Task 7: DICOM manifest loading
+    loadDicomSeriesFromManifest: (manifestUrl: string) => Promise<void>,
     // eslint-disable-next-line @typescript-eslint/ban-types
     setCrosshairColor: Function,
     // Task 5: saveDrawing is now async
@@ -167,6 +172,9 @@ function App() {
     }
     await nv.attachToCanvas(canvasRef.current);
     nv.onLocationChange = onLocationChange;
+    // Phase 2 Task 7: Initialize DICOM loader for manifest-based loading
+    // Note: The loader receives Array<{name, data: ArrayBuffer}> at runtime; cast to satisfy TypeScript
+    nv.useDicomLoader({ loader: (data: any) => dicomLoader(data as any), toExt: 'nii' });
     // Task 7.5: Volume notifications - notify Swift when images are loaded
     nv.onImageLoaded = (volume) => {
       console.log('[NiiVue] onImageLoaded:', volume.id, volume.name)
@@ -279,6 +287,12 @@ function App() {
     nvSetClickToSegmentEnabled(nv, enabled)
   }
 
+  // Phase 2 Task 7: DICOM manifest loading
+  async function loadDicomSeriesFromManifest(manifestUrl: string): Promise<void> {
+    console.log(`[loadDicomSeriesFromManifest] Loading from manifest: ${manifestUrl}`)
+    await nvLoadDicomSeriesFromManifest(nv, manifestUrl)
+  }
+
   function setCrosshairColor() {
     nv.setCrosshairColor([0,1,0,0.5])
   }
@@ -328,6 +342,7 @@ function App() {
     window.setDrawOpacity = setDrawOpacity  // Phase 2 Task 5: Draw opacity
     window.setDrawColormap = setDrawColormap  // Phase 2 Task 5: Draw colormap
     window.setClickToSegmentEnabled = setClickToSegmentEnabled  // Phase 2 Task 5: Click-to-segment
+    window.loadDicomSeriesFromManifest = loadDicomSeriesFromManifest  // Phase 2 Task 7: DICOM manifest
     window.setCrosshairColor = setCrosshairColor
     window.saveDrawing = saveDrawing
     window.setSliceType = setSliceType
