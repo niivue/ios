@@ -9,11 +9,23 @@ import XCTest
 
 final class NiiVueUITests: XCTestCase {
 
+    private func isSwitchOn(_ element: XCUIElement) -> Bool {
+        let value = String(describing: element.value ?? "")
+        return value == "1" || value.lowercased() == "on" || value.lowercased() == "true"
+    }
+
+    private func tapTrailingEdge(of element: XCUIElement) {
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+    }
+
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
 
         // In UI tests it is usually best to stop immediately when a failure occurs.
         continueAfterFailure = false
+
+        // Keep tests deterministic regardless of how the physical device is being held.
+        XCUIDevice.shared.orientation = .portrait
 
         // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
     }
@@ -242,5 +254,90 @@ final class NiiVueUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["niivue.segmentationSheet"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["niivue.importDicom"].exists)
         app.buttons["Done"].tap()
+    }
+
+    /// Segmentation UX: Click-to-segment requires drawing enabled in Niivue. Enabling click-to-segment should enable drawing.
+    func testSegmentationClickToSegmentEnablesDrawing() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-load-multiple"]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 15))
+
+        let readyDeadline = Date().addingTimeInterval(20)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+
+        app.buttons["niivue.segmentation"].tap()
+        XCTAssertTrue(app.otherElements["niivue.segmentationSheet"].waitForExistence(timeout: 2))
+
+        let clickToSegment = app.switches["niivue.segmentation.clickToSegment"]
+        let clickToSegmentLabel = app.staticTexts["Click-to-segment"]
+        // In smaller detents, SwiftUI's Form can lazily create rows; scroll until visible.
+        if !clickToSegment.waitForExistence(timeout: 2) {
+            let scrollView = app.scrollViews.firstMatch
+            for _ in 0..<6 where !clickToSegment.exists {
+                if scrollView.exists {
+                    scrollView.swipeUp()
+                } else {
+                    app.swipeUp()
+                }
+            }
+        }
+        XCTAssertTrue(clickToSegment.waitForExistence(timeout: 5))
+
+        print("[UI] clickToSegment isEnabled=\(clickToSegment.isEnabled) isHittable=\(clickToSegment.isHittable)")
+        print("[UI] clickToSegment frame=\(clickToSegment.frame)")
+        print("[UI] clickToSegment initial value = \(String(describing: clickToSegment.value))")
+        if !isSwitchOn(clickToSegment) {
+            clickToSegment.tap()
+            if !isSwitchOn(clickToSegment) {
+                print("[UI] clickToSegment tap did not toggle; tapping trailing edge as fallback")
+                tapTrailingEdge(of: clickToSegment)
+            }
+        }
+        let clickDeadline = Date().addingTimeInterval(3)
+        while Date() < clickDeadline, !isSwitchOn(clickToSegment) {
+            print("[UI] clickToSegment current value = \(String(describing: clickToSegment.value))")
+            sleep(1)
+        }
+        if !isSwitchOn(clickToSegment), clickToSegmentLabel.exists, clickToSegmentLabel.isHittable {
+            print("[UI] clickToSegment switch tap did not toggle; tapping label row as fallback")
+            clickToSegmentLabel.tap()
+            let labelDeadline = Date().addingTimeInterval(3)
+            while Date() < labelDeadline, !isSwitchOn(clickToSegment) {
+                print("[UI] clickToSegment current value (after label tap) = \(String(describing: clickToSegment.value))")
+                sleep(1)
+            }
+        }
+        XCTContext.runActivity(named: "Screenshot: Segmentation after enabling click-to-segment") { activity in
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.lifetime = .keepAlways
+            activity.add(attachment)
+        }
+        XCTAssertTrue(isSwitchOn(clickToSegment), "Expected 'Click-to-segment' to be ON after tapping the switch.")
+
+        app.buttons["Done"].tap()
+
+        app.buttons["niivue.settings"].tap()
+        let drawingEnabled = app.switches["Drawing enabled"]
+        XCTAssertTrue(drawingEnabled.waitForExistence(timeout: 5))
+
+        XCTContext.runActivity(named: "Screenshot: Settings after enabling click-to-segment") { activity in
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.lifetime = .keepAlways
+            activity.add(attachment)
+        }
+
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline, !isSwitchOn(drawingEnabled) {
+            sleep(1)
+        }
+
+        XCTAssertTrue(isSwitchOn(drawingEnabled), "Expected 'Drawing enabled' to be ON after enabling click-to-segment.")
     }
 }

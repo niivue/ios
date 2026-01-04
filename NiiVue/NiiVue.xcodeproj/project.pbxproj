@@ -402,9 +402,9 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd ./React\nnpm run build\n";
-		};
-/* End PBXShellScriptBuildPhase section */
+				shellScript = "set -e\n\n# Xcode Run Script phases execute with a minimal PATH (often missing Homebrew).\n# Add common locations for Node/npm.\nexport PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"\n\ncd \"${SRCROOT}/React\"\n\n# If npm isn't on PATH, try enabling nvm-managed Node (common on dev machines).\nif ! command -v npm >/dev/null 2>&1; then\n  export NVM_DIR=\"${NVM_DIR:-$HOME/.nvm}\"\n  if [ -s \"$NVM_DIR/nvm.sh\" ]; then\n    . \"$NVM_DIR/nvm.sh\"\n    nvm use --silent >/dev/null 2>&1 || nvm use --silent node >/dev/null 2>&1 || true\n  fi\nfi\n\nif command -v npm >/dev/null 2>&1; then\n  NPM=`command -v npm`\nelif [ -x /opt/homebrew/bin/npm ]; then\n  NPM=/opt/homebrew/bin/npm\nelif [ -x /usr/local/bin/npm ]; then\n  NPM=/usr/local/bin/npm\nelif [ -x \"$HOME/.volta/bin/npm\" ]; then\n  NPM=\"$HOME/.volta/bin/npm\"\nelif [ -x \"$HOME/.asdf/shims/npm\" ]; then\n  NPM=\"$HOME/.asdf/shims/npm\"\nelse\n  echo \"error: npm not found. Install Node.js (includes npm) or ensure npm is on PATH.\"\n  echo \"error: If you use Homebrew, install with: brew install node\"\n  echo \"error: If you use nvm, ensure a Node version is installed: nvm install node\"\n  exit 1\nfi\n\n\"$NPM\" run build\n";
+			};
+	/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		34CD17EE2B45C5400015EF4C /* Sources */ = {

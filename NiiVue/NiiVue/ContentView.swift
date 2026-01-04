@@ -563,6 +563,16 @@ struct ContentView: View {
 
     @MainActor
     private func setClickToSegmentEnabled(_ enabled: Bool) {
+        #if DEBUG
+        print("[ContentView] setClickToSegmentEnabled(\(enabled)) drawingEnabled(before)=\(drawingEnabled)")
+        #endif
+        // Niivue requires drawing to be enabled for click-to-segment to work (it operates on the drawing layer).
+        if enabled, drawingEnabled == false {
+            drawingEnabled = true
+            #if DEBUG
+            print("[ContentView] Auto-enabled drawing for click-to-segment")
+            #endif
+        }
         Task {
             do {
                 try await webViewManager.setClickToSegmentEnabled(enabled: enabled)
@@ -1246,7 +1256,9 @@ struct ContentView: View {
 
                                     Toggle("Click-to-segment", isOn: $clickToSegmentEnabled)
                                         .accessibilityIdentifier("niivue.segmentation.clickToSegment")
-                                        .onChange(of: clickToSegmentEnabled) { newValue in setClickToSegmentEnabled(newValue) }
+                                        .onChange(of: clickToSegmentEnabled) { newValue in
+                                            setClickToSegmentEnabled(newValue)
+                                        }
 
                                     if let message = segmentationToolStatusMessage {
                                         Text(message)
