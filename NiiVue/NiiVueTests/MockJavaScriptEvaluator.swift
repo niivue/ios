@@ -19,6 +19,11 @@ final class MockJavaScriptEvaluator: JavaScriptEvaluating {
     }
 
     func evaluateString(_ javaScript: String) async throws -> String? {
+        let trimmed = javaScript.trimmingCharacters(in: .whitespacesAndNewlines)
+        precondition(
+            !trimmed.hasPrefix("return "),
+            "evaluateString expects an expression; use callAsyncString for function bodies."
+        )
         scripts.append(javaScript)
         return nextString
     }

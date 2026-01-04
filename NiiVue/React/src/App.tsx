@@ -17,7 +17,11 @@ import {
   drawUndo as nvDrawUndo,
   setDrawOpacity as nvSetDrawOpacity,
   setDrawColormap as nvSetDrawColormap,
-  setClickToSegmentEnabled as nvSetClickToSegmentEnabled
+  setClickToSegmentEnabled as nvSetClickToSegmentEnabled,
+  addVolumesFromUrls as nvAddVolumesFromUrls,
+  loadMeshesFromUrls as nvLoadMeshesFromUrls,
+  exportViewerState as nvExportViewerState,
+  applyViewerState as nvApplyViewerState
 } from './bridge/volumeCommands'
 
 declare global {
@@ -31,6 +35,14 @@ declare global {
     getVolumeCount: () => number,
     // Phase 2 Task 2: Get volume info list
     getVolumeInfoList: () => string,
+    // Phase 2 UI: Add overlay volumes (masks/textures) without clearing
+    addVolumesFromUrls: (volumes: Array<{ url: string; name: string }>) => Promise<void>,
+    // Phase 2 UI: Load meshes
+    loadMeshesFromUrls: (meshes: Array<{ url: string; name: string }>) => Promise<void>,
+    // Phase 2 UI: Export viewer state (thin snapshot)
+    exportViewerState: () => string,
+    // Phase 2 UI: Apply viewer state (thin snapshot)
+    applyViewerState: (json: string) => void,
     // Phase 2 Task 3: Colormap and opacity controls
     setColormap: (volumeIndex: number, colormap: string) => void,
     setOpacity: (volumeIndex: number, opacity: number) => void,
@@ -195,6 +207,28 @@ function App() {
     console.log(`Loaded, now have ${nv.volumes.length} volumes`)
   }
 
+  // Phase 2 UI: Append volumes (masks/textures) without clearing existing volumes.
+  async function addVolumesFromUrls(volumes: Array<{ url: string; name: string }>) {
+    console.log(`[addVolumesFromUrls] Adding ${volumes.length} volumes`)
+    await nvAddVolumesFromUrls(nv, volumes)
+  }
+
+  // Phase 2 UI: Load segmentation meshes.
+  async function loadMeshesFromUrls(meshes: Array<{ url: string; name: string }>) {
+    console.log(`[loadMeshesFromUrls] Loading ${meshes.length} meshes`)
+    await nvLoadMeshesFromUrls(nv, meshes)
+  }
+
+  // Phase 2 UI: Export a thin viewer-state snapshot for iOS SessionStore.
+  function exportViewerState(): string {
+    return nvExportViewerState(nv)
+  }
+
+  // Phase 2 UI: Apply a previously-exported thin viewer-state snapshot.
+  function applyViewerState(json: string): void {
+    nvApplyViewerState(nv, json)
+  }
+
   // Phase 2 Task 2: Get current volume count
   function getVolumeCount(): number {
     return nv.volumes.length
@@ -280,6 +314,10 @@ function App() {
     window.loadBase64Image = loadBase64Image
     window.loadImageFromUrl = loadImageFromUrl  // Task 10: URL-based loading
     window.loadVolumesFromUrls = loadVolumesFromUrls  // Phase 2 Task 2: Multi-volume
+    window.addVolumesFromUrls = addVolumesFromUrls  // Phase 2 UI: Add overlay volumes
+    window.loadMeshesFromUrls = loadMeshesFromUrls  // Phase 2 UI: Load meshes
+    window.exportViewerState = exportViewerState  // Phase 2 UI: Thin snapshot export
+    window.applyViewerState = applyViewerState  // Phase 2 UI: Apply snapshot
     window.getVolumeCount = getVolumeCount  // Phase 2 Task 2: Get volume count
     window.getVolumeInfoList = getVolumeInfoList  // Phase 2 Task 2: Get volume info
     window.setColormap = setColormap  // Phase 2 Task 3: Colormap control

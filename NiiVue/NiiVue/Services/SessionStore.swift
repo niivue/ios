@@ -8,6 +8,10 @@
 
 import Foundation
 
+enum SessionStoreError: Error, Equatable {
+    case invalidID
+}
+
 /// Manages session snapshots and provides save/load functionality.
 /// Uses actor isolation for thread-safe access.
 actor SessionStore {
@@ -15,6 +19,13 @@ actor SessionStore {
 
     init(sessionsDirectory: URL = SessionStore.defaultSessionsDirectory()) {
         self.sessionsDirectory = sessionsDirectory
+    }
+
+    private func sessionFileURL(for id: String) throws -> URL {
+        guard let uuid = UUID(uuidString: id) else {
+            throw SessionStoreError.invalidID
+        }
+        return sessionsDirectory.appendingPathComponent("\(uuid.uuidString).json")
     }
 
     static func defaultSessionsDirectory() -> URL {
@@ -43,7 +54,7 @@ actor SessionStore {
     /// - Parameter id: The session ID
     /// - Returns: The session JSON string
     func load(id: String) throws -> String {
-        let sessionFile = sessionsDirectory.appendingPathComponent("\(id).json")
+        let sessionFile = try sessionFileURL(for: id)
         return try String(contentsOf: sessionFile, encoding: .utf8)
     }
 
@@ -61,6 +72,7 @@ actor SessionStore {
         // Sort by modification date (most recent first)
         let sorted = files
             .filter { $0.pathExtension == "json" }
+            .filter { UUID(uuidString: $0.deletingPathExtension().lastPathComponent) != nil }
             .sorted { (a, b) -> Bool in
                 let aDate = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
                 let bDate = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
@@ -73,7 +85,7 @@ actor SessionStore {
     /// Deletes a session by ID.
     /// - Parameter id: The session ID to delete
     func delete(id: String) throws {
-        let sessionFile = sessionsDirectory.appendingPathComponent("\(id).json")
+        let sessionFile = try sessionFileURL(for: id)
         try FileManager.default.removeItem(at: sessionFile)
     }
 }

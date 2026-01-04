@@ -14,6 +14,107 @@ import UniformTypeIdentifiers
 
 typealias MessageCallback = (String) -> Void
 
+enum SegmentationAssetKind: Equatable {
+    case mesh
+    case volume
+    case unsupported
+}
+
+struct SegmentationAssetClassifier {
+    private static let meshExtensions: Set<String> = [
+        "asc", "byu", "dfs", "fsm", "pial", "orig", "inflated", "smoothwm", "sphere", "white",
+        "g", "geo", "gii", "ico", "mz3", "nv", "obj", "off", "ply", "srf", "stl",
+        "tck", "tract", "tri", "trk", "tt", "trx", "vtk", "wrl", "x3d", "jcon", "json"
+    ]
+
+    private static let volumeExtensions: Set<String> = ["nii"]
+
+    // Includes bitmap images that Niivue can load as images (used as "textures" in some workflows).
+    private static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "bmp", "tif", "tiff"]
+
+    static func classify(url: URL) -> SegmentationAssetKind {
+        let fileName = url.lastPathComponent.lowercased()
+        if fileName.hasSuffix(".nii.gz") {
+            return .volume
+        }
+
+        let ext = url.pathExtension.lowercased()
+        if volumeExtensions.contains(ext) {
+            return .volume
+        }
+        if meshExtensions.contains(ext) {
+            return .mesh
+        }
+        if imageExtensions.contains(ext) {
+            return .volume
+        }
+        return .unsupported
+    }
+}
+
+struct SegmentationAssetImportPlan {
+    let volumeSpecs: [(url: String, name: String)]
+    let meshSpecs: [(url: String, name: String)]
+    let unsupportedFileNames: [String]
+}
+
+struct SegmentationAssetImportPlanner {
+    static func plan(importedFiles: [FileImportService.ImportedFile]) -> SegmentationAssetImportPlan {
+        var volumeSpecs: [(url: String, name: String)] = []
+        var meshSpecs: [(url: String, name: String)] = []
+        var unsupportedFileNames: [String] = []
+
+        for imported in importedFiles {
+            let kind = SegmentationAssetClassifier.classify(url: imported.localURL)
+            switch kind {
+            case .volume:
+                volumeSpecs.append((url: "niivue://app/files/\(imported.id)", name: imported.originalFileName))
+            case .mesh:
+                meshSpecs.append((url: "niivue://app/files/\(imported.id)", name: imported.originalFileName))
+            case .unsupported:
+                unsupportedFileNames.append(imported.originalFileName)
+            }
+        }
+
+        return SegmentationAssetImportPlan(
+            volumeSpecs: volumeSpecs,
+            meshSpecs: meshSpecs,
+            unsupportedFileNames: unsupportedFileNames
+        )
+    }
+}
+
+struct SegmentationAssetImportExecutor {
+    static func execute(plan: SegmentationAssetImportPlan, webViewManager: WebViewManager) async throws {
+        if !plan.volumeSpecs.isEmpty {
+            try await webViewManager.addVolumesFromUrls(plan.volumeSpecs)
+        }
+
+        if !plan.meshSpecs.isEmpty {
+            try await webViewManager.loadMeshesFromUrls(plan.meshSpecs)
+        }
+    }
+}
+
+/// A tiny UIKit-backed accessibility element used to reliably expose an `accessibilityIdentifier`
+/// for UI tests (SwiftUI containers like `VStack` may not surface as `otherElements`).
+struct AccessibilityMarkerView: UIViewRepresentable {
+    let identifier: String
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isAccessibilityElement = true
+        view.accessibilityIdentifier = identifier
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        uiView.accessibilityIdentifier = identifier
+    }
+}
+
 struct DocumentPicker: UIViewControllerRepresentable {
     @Binding var presented: Bool // To control the presentation state
     var onPick: (URL) -> Void // Closure to handle the picked document
@@ -58,6 +159,47 @@ struct DocumentPicker: UIViewControllerRepresentable {
     }
 }
 
+struct DocumentPickerMultiple: UIViewControllerRepresentable {
+    @Binding var presented: Bool
+    var onPick: ([URL]) -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        Self.makePicker(delegate: context.coordinator)
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {
+        // No-op.
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    static func makePicker(delegate: UIDocumentPickerDelegate) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.data], asCopy: true)
+        picker.allowsMultipleSelection = true
+        picker.delegate = delegate
+        return picker
+    }
+
+    class Coordinator: NSObject, UIDocumentPickerDelegate {
+        var parent: DocumentPickerMultiple
+
+        init(_ documentPicker: DocumentPickerMultiple) {
+            self.parent = documentPicker
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            parent.onPick(urls)
+            parent.presented = false
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            parent.presented = false
+        }
+    }
+}
+
 struct WebView: UIViewRepresentable {
     @ObservedObject var manager: WebViewManager
 
@@ -76,7 +218,25 @@ struct ContentView: View {
     @StateObject private var webViewManager = WebViewManager()
 
     @State private var documentPickerPresented = false
+    @State private var segmentationAssetsPickerPresented = false
+    @State private var segmentationImportInProgress = false
+    @State private var segmentationImportStatusMessage: String?
     @State private var settingsSheetPresented = false
+    @State private var volumesSheetPresented = false
+    @State private var volumesSheetStatusMessage: String?
+    @State private var availableVolumeColormaps: [String] = []
+    @State private var volumeOpacityByID: [String: Double] = [:]
+    @State private var volumeColormapByID: [String: String] = [:]
+    @State private var volumeFrame4DByID: [String: Int] = [:]
+    @State private var segmentationSheetPresented = false
+    @State private var segmentationToolStatusMessage: String?
+    @State private var drawOpacity: Double = 1.0
+    @State private var drawColormap: String = "gray"
+    @State private var clickToSegmentEnabled = false
+    @State private var sessionsSheetPresented = false
+    @State private var sessionsStatusMessage: String?
+    @State private var sessionsInProgress = false
+    @State private var sessionIDs: [String] = []
     @State private var pickedDocumentURL: URL?
     @State private var base64EncodedString: String?
     @State private var sliceType = SliceTypes.Multiplanar.rawValue // default sliceType is multiplanar
@@ -99,6 +259,10 @@ struct ContentView: View {
     /// Phase 2 Task 2: Check if we should load multiple volumes for UI testing
     private var isUITestLoadMultiple: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-test-load-multiple")
+    }
+
+    private var isUITestSessionsTemp: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-sessions-temp")
     }
 
     enum SliceTypes: Int, CaseIterable, Identifiable {
@@ -147,20 +311,304 @@ struct ContentView: View {
 
     private let maxBase64FallbackBytes = 25 * 1024 * 1024
 
-    func encodeFileToBase64(url: URL) -> String? {
-        guard let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-              fileSize <= maxBase64FallbackBytes else {
-            print("Skipping base64 fallback: file too large or size unknown (\(url.lastPathComponent))")
-            return nil
-        }
+    private func importSegmentationAssets(from pickedURLs: [URL]) {
+        Task {
+            await MainActor.run {
+                segmentationImportInProgress = true
+                segmentationImportStatusMessage = "Importing \(pickedURLs.count) file(s)…"
+            }
 
+            defer {
+                Task { @MainActor in
+                    segmentationImportInProgress = false
+                }
+            }
+
+            let libraryDir = FileImportService.defaultLibraryDirectory()
+            do {
+                try FileManager.default.createDirectory(at: libraryDir, withIntermediateDirectories: true)
+            } catch {
+                await MainActor.run {
+                    segmentationImportStatusMessage = "Failed to create Library directory: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            let fileImportService = FileImportService()
+            var importedFiles: [FileImportService.ImportedFile] = []
+            var failedImports: [String] = []
+
+            for url in pickedURLs {
+                do {
+                    let imported = try await fileImportService.importDocument(at: url, destinationDirectory: libraryDir)
+                    importedFiles.append(imported)
+                    await webViewManager.importedFileStore.register(importedFile: imported)
+                } catch {
+                    failedImports.append(url.lastPathComponent)
+                }
+            }
+
+            let plan = SegmentationAssetImportPlanner.plan(importedFiles: importedFiles)
+            do {
+                try await SegmentationAssetImportExecutor.execute(plan: plan, webViewManager: webViewManager)
+            } catch {
+                await MainActor.run {
+                    segmentationImportStatusMessage = "Failed to load assets into Niivue: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            let loadedCount = plan.volumeSpecs.count + plan.meshSpecs.count
+            var summary = "Imported \(importedFiles.count)/\(pickedURLs.count) file(s). Loaded \(loadedCount) asset(s)."
+            if !plan.unsupportedFileNames.isEmpty {
+                summary.append(" Unsupported: \(plan.unsupportedFileNames.joined(separator: ", ")).")
+            }
+            if !failedImports.isEmpty {
+                summary.append(" Failed: \(failedImports.joined(separator: ", ")).")
+            }
+
+            await MainActor.run {
+                segmentationImportStatusMessage = summary
+            }
+        }
+    }
+
+    // MARK: - Phase 2 UI: Volume controls
+
+    @MainActor
+    private func loadVolumeColormapsIfNeeded() async {
+        guard availableVolumeColormaps.isEmpty else { return }
         do {
-            let fileData = try Data(contentsOf: url)
-            let base64String = fileData.base64EncodedString()
-            return base64String
+            let colormaps = try await webViewManager.listColormaps()
+            availableVolumeColormaps = colormaps.isEmpty ? ["gray"] : colormaps
         } catch {
-            print("Error reading file: \(error)")
-            return nil
+            volumesSheetStatusMessage = "Failed to load colormaps: \(error.localizedDescription)"
+            availableVolumeColormaps = ["gray"]
+        }
+    }
+
+    @MainActor
+    private func displayedColormap(for volumeID: String) -> String {
+        volumeColormapByID[volumeID] ?? availableVolumeColormaps.first ?? "gray"
+    }
+
+    @MainActor
+    private func setVolumeColormap(_ colormap: String, volumeIndex: Int, volumeID: String) {
+        volumeColormapByID[volumeID] = colormap
+        Task {
+            do {
+                try await webViewManager.setColormap(volumeIndex: volumeIndex, colormap: colormap)
+            } catch {
+                await MainActor.run {
+                    volumesSheetStatusMessage = "Failed to set colormap: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func opacityBinding(volumeID: String, volumeIndex: Int) -> Binding<Double> {
+        Binding(
+            get: { volumeOpacityByID[volumeID] ?? 1.0 },
+            set: { newValue in
+                volumeOpacityByID[volumeID] = newValue
+                Task {
+                    do {
+                        try await webViewManager.setOpacity(volumeIndex: volumeIndex, opacity: newValue)
+                    } catch {
+                        await MainActor.run {
+                            volumesSheetStatusMessage = "Failed to set opacity: \(error.localizedDescription)"
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    @MainActor
+    private func frame4DBinding(volumeID: String, volumeIndex: Int, maxFrame: Int) -> Binding<Int> {
+        Binding(
+            get: { min(max(volumeFrame4DByID[volumeID] ?? 0, 0), maxFrame) },
+            set: { newValue in
+                let clamped = min(max(newValue, 0), maxFrame)
+                volumeFrame4DByID[volumeID] = clamped
+                Task {
+                    do {
+                        try await webViewManager.setFrame4D(volumeIndex: volumeIndex, frame: clamped)
+                    } catch {
+                        await MainActor.run {
+                            volumesSheetStatusMessage = "Failed to set frame: \(error.localizedDescription)"
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    // MARK: - Phase 2 UI: Segmentation tool controls
+
+    @MainActor
+    private func setDrawOpacity(_ opacity: Double) {
+        Task {
+            do {
+                try await webViewManager.setDrawOpacity(opacity: opacity)
+                await MainActor.run { segmentationToolStatusMessage = nil }
+            } catch {
+                await MainActor.run {
+                    segmentationToolStatusMessage = "Failed to set draw opacity: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func setDrawColormap(_ colormap: String) {
+        Task {
+            do {
+                try await webViewManager.setDrawColormap(colormap: colormap)
+                await MainActor.run { segmentationToolStatusMessage = nil }
+            } catch {
+                await MainActor.run {
+                    segmentationToolStatusMessage = "Failed to set draw colormap: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func setClickToSegmentEnabled(_ enabled: Bool) {
+        Task {
+            do {
+                try await webViewManager.setClickToSegmentEnabled(enabled: enabled)
+                await MainActor.run { segmentationToolStatusMessage = nil }
+            } catch {
+                await MainActor.run {
+                    segmentationToolStatusMessage = "Failed to set click-to-segment: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func drawUndo() {
+        Task {
+            do {
+                try await webViewManager.drawUndo()
+                await MainActor.run { segmentationToolStatusMessage = nil }
+            } catch {
+                await MainActor.run {
+                    segmentationToolStatusMessage = "Failed to undo draw: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    // MARK: - Phase 2 UI: Sessions
+
+    private func sessionsDirectoryURL() -> URL {
+        if isUITestSessionsTemp {
+            return FileManager.default.temporaryDirectory
+                .appendingPathComponent("NiiVue-UITests", isDirectory: true)
+                .appendingPathComponent("Sessions", isDirectory: true)
+        }
+        return SessionStore.defaultSessionsDirectory()
+    }
+
+    @MainActor
+    private func resetSessionsDirectoryForUITestsIfNeeded() {
+        guard isUITestSessionsTemp else { return }
+        let dir = sessionsDirectoryURL()
+        do {
+            try? FileManager.default.removeItem(at: dir)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            sessionsStatusMessage = "Failed to reset sessions directory: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    private func refreshSessionsList() {
+        Task {
+            do {
+                let store = SessionStore(sessionsDirectory: sessionsDirectoryURL())
+                let ids = try await store.list()
+                await MainActor.run {
+                    sessionIDs = ids
+                }
+            } catch {
+                await MainActor.run {
+                    sessionsStatusMessage = "Failed to list sessions: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func saveSession() {
+        sessionsInProgress = true
+        Task {
+            defer {
+                Task { @MainActor in sessionsInProgress = false }
+            }
+            do {
+                let json = try await webViewManager.exportSessionSnapshotJSON()
+                let store = SessionStore(sessionsDirectory: sessionsDirectoryURL())
+                let id = try await store.save(json: json)
+                let ids = try await store.list()
+                await MainActor.run {
+                    sessionIDs = ids
+                    sessionsStatusMessage = "Saved session \(id.prefix(8))"
+                }
+            } catch {
+                await MainActor.run {
+                    sessionsStatusMessage = "Failed to save session: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func applySession(id: String) {
+        sessionsInProgress = true
+        Task {
+            defer {
+                Task { @MainActor in sessionsInProgress = false }
+            }
+            do {
+                let store = SessionStore(sessionsDirectory: sessionsDirectoryURL())
+                let json = try await store.load(id: id)
+                try await webViewManager.restoreSessionJSON(json)
+                await MainActor.run {
+                    sessionsStatusMessage = "Applied session \(id.prefix(8))"
+                }
+            } catch {
+                await MainActor.run {
+                    sessionsStatusMessage = "Failed to apply session: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func deleteSession(id: String) {
+        sessionsInProgress = true
+        Task {
+            defer {
+                Task { @MainActor in sessionsInProgress = false }
+            }
+            do {
+                let store = SessionStore(sessionsDirectory: sessionsDirectoryURL())
+                try await store.delete(id: id)
+                let ids = try await store.list()
+                await MainActor.run {
+                    sessionIDs = ids
+                    sessionsStatusMessage = "Deleted session \(id.prefix(8))"
+                }
+            } catch {
+                await MainActor.run {
+                    sessionsStatusMessage = "Failed to delete session: \(error.localizedDescription)"
+                }
+            }
         }
     }
 
@@ -356,8 +804,9 @@ struct ContentView: View {
                                 print("Error importing file: \(error)")
 
                                 let fallbackURL = importedFile?.localURL ?? url
+                                let maxBytes = maxBase64FallbackBytes
                                 let encodedString = await Task.detached(priority: .userInitiated) {
-                                    encodeFileToBase64(url: fallbackURL)
+                                    Base64FileEncoder.encodeFileToBase64(url: fallbackURL, maxBytes: maxBytes)
                                 }.value
 
                                 // Fallback to base64 loading if URL-based fails (limited by maxBase64FallbackBytes)
@@ -516,6 +965,308 @@ struct ContentView: View {
                         .presentationContentInteraction(.scrolls)
                     } // Vstack in sheet
                 }
+
+                // Phase 2 UI: Dedicated Volumes sheet
+                Button(action: {
+                    volumesSheetPresented = true
+                }) {
+                    Image(systemName: "square.stack.3d.up")
+                        .padding()
+                        .foregroundColor(.white)
+                }
+                .accessibilityIdentifier("niivue.volumes")
+                .sheet(isPresented: $volumesSheetPresented) {
+                    NavigationStack {
+                        VStack(spacing: 0) {
+                            AccessibilityMarkerView(identifier: "niivue.volumesSheet")
+                                .frame(width: 1, height: 1)
+                                .opacity(0.01)
+
+                            if let message = volumesSheetStatusMessage {
+                                Text(message)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal)
+                                    .padding(.top, 8)
+                                    .accessibilityIdentifier("niivue.volumesStatus")
+                            }
+
+                            List {
+                                if webViewManager.volumes.isEmpty {
+                                    Text("No volumes loaded")
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    ForEach(Array(webViewManager.volumes.enumerated()), id: \.element.id) { index, volume in
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            Text(volume.name)
+                                                .font(.headline)
+                                                .lineLimit(2)
+
+                                            HStack {
+                                                Text("Colormap")
+                                                Spacer()
+                                                Menu {
+                                                    ForEach(availableVolumeColormaps, id: \.self) { colormap in
+                                                        Button(colormap) {
+                                                            setVolumeColormap(colormap, volumeIndex: index, volumeID: volume.id)
+                                                        }
+                                                    }
+                                                } label: {
+                                                    Text(displayedColormap(for: volume.id))
+                                                        .lineLimit(1)
+                                                }
+                                                .accessibilityIdentifier("niivue.volume.colormap.\(index)")
+                                            }
+
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                HStack {
+                                                    Text("Opacity")
+                                                    Spacer()
+                                                    Text(String(format: "%.2f", volumeOpacityByID[volume.id] ?? 1.0))
+                                                        .font(.system(.caption, design: .monospaced))
+                                                        .foregroundStyle(.secondary)
+                                                }
+
+                                                Slider(value: opacityBinding(volumeID: volume.id, volumeIndex: index), in: 0...1)
+                                                    .accessibilityIdentifier("niivue.volume.opacity.\(index)")
+                                            }
+
+                                            if volume.nFrame4D > 1 {
+                                                let binding = frame4DBinding(
+                                                    volumeID: volume.id,
+                                                    volumeIndex: index,
+                                                    maxFrame: volume.nFrame4D - 1
+                                                )
+                                                Stepper(
+                                                    "Frame \(binding.wrappedValue)",
+                                                    value: binding,
+                                                    in: 0...(volume.nFrame4D - 1)
+                                                )
+                                                .accessibilityIdentifier("niivue.volume.frame4d.\(index)")
+                                            }
+                                        }
+                                        .padding(.vertical, 8)
+                                    }
+                                }
+                            }
+                            .listStyle(.insetGrouped)
+                        }
+                        .navigationTitle("Volumes")
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Done") { volumesSheetPresented = false }
+                            }
+                        }
+                        .task {
+                            await loadVolumeColormapsIfNeeded()
+                        }
+                    }
+                }
+
+                // Phase 2 UI: Dedicated Segmentation sheet
+                Button(action: {
+                    segmentationSheetPresented = true
+                }) {
+                    Image(systemName: "pencil.and.outline")
+                        .padding()
+                        .foregroundColor(.white)
+                }
+                .accessibilityIdentifier("niivue.segmentation")
+                .sheet(isPresented: $segmentationSheetPresented) {
+                    NavigationStack {
+                        VStack(spacing: 0) {
+                            AccessibilityMarkerView(identifier: "niivue.segmentationSheet")
+                                .frame(width: 1, height: 1)
+                                .opacity(0.01)
+                            Form {
+                                Section {
+                                    Button("Import Segmentation Assets") {
+                                        segmentationAssetsPickerPresented = true
+                                    }
+                                    .accessibilityIdentifier("niivue.importSegmentationAssets")
+                                    .disabled(segmentationImportInProgress)
+
+                                    if segmentationImportInProgress {
+                                        ProgressView()
+                                            .accessibilityIdentifier("niivue.segmentationImportProgress")
+                                    }
+
+                                    if let message = segmentationImportStatusMessage {
+                                        Text(message)
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .multilineTextAlignment(.leading)
+                                            .accessibilityIdentifier("niivue.segmentationImportStatus")
+                                    }
+                                } header: {
+                                    Text("Assets")
+                                }
+
+                                Section {
+                                    Button("Undo") {
+                                        drawUndo()
+                                    }
+                                    .accessibilityIdentifier("niivue.segmentation.undo")
+
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack {
+                                            Text("Draw opacity")
+                                            Spacer()
+                                            Text(String(format: "%.2f", drawOpacity))
+                                                .font(.system(.caption, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Slider(value: $drawOpacity, in: 0...1)
+                                            .accessibilityIdentifier("niivue.segmentation.drawOpacity")
+                                            .onChange(of: drawOpacity) { newValue in setDrawOpacity(newValue) }
+                                    }
+
+                                    HStack {
+                                        Text("Draw colormap")
+                                        Spacer()
+                                        Menu {
+                                            ForEach(availableVolumeColormaps.isEmpty ? ["gray"] : availableVolumeColormaps, id: \.self) { colormap in
+                                                Button(colormap) {
+                                                    drawColormap = colormap
+                                                    setDrawColormap(colormap)
+                                                }
+                                            }
+                                        } label: {
+                                            Text(drawColormap)
+                                                .lineLimit(1)
+                                        }
+                                        .accessibilityIdentifier("niivue.segmentation.drawColormap")
+                                    }
+
+                                    Toggle("Click-to-segment", isOn: $clickToSegmentEnabled)
+                                        .accessibilityIdentifier("niivue.segmentation.clickToSegment")
+                                        .onChange(of: clickToSegmentEnabled) { newValue in setClickToSegmentEnabled(newValue) }
+
+                                    if let message = segmentationToolStatusMessage {
+                                        Text(message)
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .multilineTextAlignment(.leading)
+                                            .accessibilityIdentifier("niivue.segmentationToolStatus")
+                                    }
+                                } header: {
+                                    Text("Tools")
+                                }
+                            }
+                        }
+                        .navigationTitle("Segmentation")
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Done") { segmentationSheetPresented = false }
+                            }
+                        }
+                        .task {
+                            await loadVolumeColormapsIfNeeded()
+                            if availableVolumeColormaps.contains(drawColormap) == false {
+                                drawColormap = availableVolumeColormaps.first ?? drawColormap
+                            }
+                        }
+                    }
+                    .sheet(isPresented: $segmentationAssetsPickerPresented) {
+                        DocumentPickerMultiple(presented: $segmentationAssetsPickerPresented) { urls in
+                            importSegmentationAssets(from: urls)
+                        }
+                    }
+                }
+
+                // Phase 2 UI: Dedicated Sessions sheet
+                Button(action: {
+                    sessionsSheetPresented = true
+                }) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .padding()
+                        .foregroundColor(.white)
+                }
+                .accessibilityIdentifier("niivue.sessions")
+                .sheet(isPresented: $sessionsSheetPresented) {
+                    NavigationStack {
+                        VStack(spacing: 0) {
+                            AccessibilityMarkerView(identifier: "niivue.sessionsSheet")
+                                .frame(width: 1, height: 1)
+                                .opacity(0.01)
+
+                            Form {
+                                Section {
+                                    HStack {
+                                        Text("Saved sessions")
+                                        Spacer()
+                                        Text("\(sessionIDs.count)")
+                                            .font(.system(.caption, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                            .accessibilityIdentifier("niivue.sessionCount")
+                                    }
+
+                                    Button("Save Session") {
+                                        saveSession()
+                                    }
+                                    .accessibilityIdentifier("niivue.saveSession")
+                                    .disabled(sessionsInProgress || !webViewManager.isReady)
+
+                                    if sessionsInProgress {
+                                        ProgressView()
+                                            .accessibilityIdentifier("niivue.sessionsProgress")
+                                    }
+
+                                    if let message = sessionsStatusMessage {
+                                        Text(message)
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .multilineTextAlignment(.leading)
+                                            .accessibilityIdentifier("niivue.sessionsStatus")
+                                    }
+                                } header: {
+                                    Text("Actions")
+                                }
+
+                                Section {
+                                    if sessionIDs.isEmpty {
+                                        Text("No sessions saved")
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        ForEach(sessionIDs, id: \.self) { id in
+                                            HStack {
+                                                Text(id)
+                                                    .font(.system(.caption, design: .monospaced))
+                                                    .lineLimit(1)
+                                                    .minimumScaleFactor(0.6)
+                                                Spacer()
+                                                Button("Apply") {
+                                                    applySession(id: id)
+                                                }
+                                                .disabled(sessionsInProgress)
+                                            }
+                                            .swipeActions {
+                                                Button(role: .destructive) {
+                                                    deleteSession(id: id)
+                                                } label: {
+                                                    Label("Delete", systemImage: "trash")
+                                                }
+                                            }
+                                        }
+                                    }
+                                } header: {
+                                    Text("Recents")
+                                }
+                            }
+                        }
+                        .navigationTitle("Sessions")
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Done") { sessionsSheetPresented = false }
+                            }
+                        }
+                        .task {
+                            resetSessionsDirectoryForUITestsIfNeeded()
+                            refreshSessionsList()
+                        }
+                    }
+                }
             } // HStack
             .padding(.horizontal) // Adds some padding on the left and right
             .background(Color.black)
@@ -589,13 +1340,19 @@ struct ContentView: View {
                         Spacer()
                         HStack {
                             Spacer()
-                            Text("\(webViewManager.volumes.count)")
-                                .foregroundColor(.white)
-                                .padding(8)
-                                .background(Color.black.opacity(0.6))
-                                .cornerRadius(4)
-                                .accessibilityIdentifier("niivue.volumeCount")
-                                .padding()
+                            VStack(alignment: .trailing, spacing: 8) {
+                                Text(webViewManager.isReady ? "ready" : "notReady")
+                                    .accessibilityIdentifier("niivue.isReady")
+                                Text("\(webViewManager.volumes.count)")
+                                    .accessibilityIdentifier("niivue.volumeCount")
+                                Text(webViewManager.lastErrorMessage ?? "")
+                                    .accessibilityIdentifier("niivue.lastError")
+                            }
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(Color.black.opacity(0.6))
+                            .cornerRadius(4)
+                            .padding()
                         }
                     }
                 }
@@ -609,10 +1366,9 @@ struct ContentView: View {
                     do {
                         // Phase 2 Task 2: UI test path loads multiple volumes
                         if isUITestLoadMultiple {
-                            // Load same sample twice to get 2 volumes
                             print("[ContentView] Loading 2 volumes for UI test")
-                            let sample1 = (url: "niivue://app/samples/T1w_DEMO.nii.gz", name: "T1w_DEMO.nii.gz")
-                            let sample2 = (url: "niivue://app/samples/T1w_DEMO.nii.gz", name: "T1w_DEMO_2.nii.gz")
+                            let sample1 = (url: "niivue://app/samples/ui-test-volume-1.nii", name: "ui-test-volume-1.nii")
+                            let sample2 = (url: "niivue://app/samples/ui-test-volume-2.nii", name: "ui-test-volume-2.nii")
                             try await webViewManager.loadVolumesFromUrls([sample1, sample2])
                             print("[ContentView] loadVolumesFromUrls returned, volumes.count = \(webViewManager.volumes.count)")
                         } else {
@@ -631,8 +1387,9 @@ struct ContentView: View {
 
                         // Fallback to base64 if URL-based fails (limited by maxBase64FallbackBytes)
                         if !isUITestLoadMultiple, let url = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples") {
+                            let maxBytes = maxBase64FallbackBytes
                             let encodedString = await Task.detached(priority: .userInitiated) {
-                                encodeFileToBase64(url: url)
+                                Base64FileEncoder.encodeFileToBase64(url: url, maxBytes: maxBytes)
                             }.value
 
                             await MainActor.run {
@@ -642,6 +1399,12 @@ struct ContentView: View {
                                 } else {
                                     webViewManager.lastErrorMessage = "Failed to load bundled sample (base64 fallback skipped)."
                                 }
+                            }
+                        }
+
+                        if isUITestLoadMultiple {
+                            await MainActor.run {
+                                webViewManager.lastErrorMessage = "UI test volume load failed: \(error.localizedDescription)"
                             }
                         }
                     }

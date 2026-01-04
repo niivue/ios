@@ -134,15 +134,25 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
         let work = Task.detached(priority: .userInitiated) { [chunkSizeBytes] in
             do {
                 if Task.isCancelled { return }
-                let response = URLResponse(
-                    url: requestURL,
-                    mimeType: mimeType,
-                    expectedContentLength: expectedContentLength,
-                    textEncodingName: nil
-                )
+                let headerFields: [String: String] = {
+                    var fields = ["Content-Type": mimeType]
+                    if expectedContentLength >= 0 {
+                        fields["Content-Length"] = "\(expectedContentLength)"
+                    }
+                    return fields
+                }()
+
+                let httpResponse =
+                    HTTPURLResponse(url: requestURL, statusCode: 200, httpVersion: nil, headerFields: headerFields) ??
+                    URLResponse(
+                        url: requestURL,
+                        mimeType: mimeType,
+                        expectedContentLength: expectedContentLength,
+                        textEncodingName: nil
+                    )
 
                 await MainActor.run {
-                    task.didReceive(response)
+                    task.didReceive(httpResponse)
                 }
 
                 if Task.isCancelled { return }

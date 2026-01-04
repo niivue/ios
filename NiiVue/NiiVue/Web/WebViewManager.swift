@@ -24,6 +24,10 @@ final class WebViewManager: NSObject, ObservableObject {
     /// List of currently loaded volumes (Phase 2: volume notifications)
     @Published var volumes: [VolumeInfo] = []
 
+    /// Sources used to load the current `volumes` stack (Phase 2 Task 6: sessions).
+    /// Used to reload volumes on session restore.
+    @Published var volumeSources: [SessionSnapshotV1.VolumeSource] = []
+
     /// Last location string from Niivue onLocationChange (Phase 2 Task 1: HUD)
     @Published var lastLocationString: String?
 
@@ -223,6 +227,7 @@ final class WebViewManager: NSObject, ObservableObject {
     func loadBase64Image(base64: String, fileName: String) async throws {
         lastErrorMessage = nil
         volumes.removeAll()
+        volumeSources.removeAll()
         let b64 = try JavaScriptQuote.jsonStringLiteral(base64)
         let name = try JavaScriptQuote.jsonStringLiteral(fileName)
         _ = try await evaluator.callAsyncString("return await window.loadBase64Image(\(b64), \(name))")
@@ -236,6 +241,7 @@ final class WebViewManager: NSObject, ObservableObject {
     func loadImageFromUrl(url: String, fileName: String) async throws {
         lastErrorMessage = nil
         volumes.removeAll()
+        volumeSources = [.init(url: url, name: fileName)]
         let urlEscaped = try JavaScriptQuote.jsonStringLiteral(url)
         let nameEscaped = try JavaScriptQuote.jsonStringLiteral(fileName)
         _ = try await evaluator.callAsyncString("return await window.loadImageFromUrl(\(urlEscaped), \(nameEscaped))")
@@ -246,6 +252,7 @@ final class WebViewManager: NSObject, ObservableObject {
     func loadVolumesFromUrls(_ volumeSpecs: [(url: String, name: String)]) async throws {
         lastErrorMessage = nil
         volumes.removeAll()
+        volumeSources = volumeSpecs.map { .init(url: $0.url, name: $0.name) }
 
         // Build JSON array string
         let volumeArray = try volumeSpecs.map { spec -> String in
@@ -260,6 +267,84 @@ final class WebViewManager: NSObject, ObservableObject {
         // Query Niivue's volume count to update our tracking
         // (onImageLoaded callbacks may be deferred)
         try await syncVolumeCount()
+    }
+
+    /// Adds volumes from URLs without clearing existing volumes (Phase 2 UI: segmentation masks/textures).
+    /// - Parameter volumeSpecs: Array of (url, name) pairs to append as additional volumes.
+    func addVolumesFromUrls(_ volumeSpecs: [(url: String, name: String)]) async throws {
+        lastErrorMessage = nil
+        volumeSources.append(contentsOf: volumeSpecs.map { .init(url: $0.url, name: $0.name) })
+
+        // Build JSON array string
+        let volumeArray = try volumeSpecs.map { spec -> String in
+            let urlEscaped = try JavaScriptQuote.jsonStringLiteral(spec.url)
+            let nameEscaped = try JavaScriptQuote.jsonStringLiteral(spec.name)
+            return "{\"url\":\(urlEscaped),\"name\":\(nameEscaped)}"
+        }
+        let jsonArray = "[\(volumeArray.joined(separator: ","))]"
+
+        _ = try await evaluator.callAsyncString("return await window.addVolumesFromUrls(\(jsonArray))")
+        try await syncVolumeCount()
+    }
+
+    /// Loads meshes from URLs (Phase 2 UI: segmentation meshes).
+    /// - Parameter meshSpecs: Array of (url, name) pairs for meshes to load.
+    func loadMeshesFromUrls(_ meshSpecs: [(url: String, name: String)]) async throws {
+        lastErrorMessage = nil
+
+        let meshArray = try meshSpecs.map { spec -> String in
+            let urlEscaped = try JavaScriptQuote.jsonStringLiteral(spec.url)
+            let nameEscaped = try JavaScriptQuote.jsonStringLiteral(spec.name)
+            return "{\"url\":\(urlEscaped),\"name\":\(nameEscaped)}"
+        }
+        let jsonArray = "[\(meshArray.joined(separator: ","))]"
+
+        _ = try await evaluator.callAsyncString("return await window.loadMeshesFromUrls(\(jsonArray))")
+    }
+
+    /// Exports a thin viewer state snapshot as JSON (Phase 2 UI: sessions).
+    /// - Returns: JSON string representing viewer state.
+    func exportViewerStateJSON() async throws -> String {
+        lastErrorMessage = nil
+        return try await evaluator.callAsyncString("return window.exportViewerState()") ?? "{}"
+    }
+
+    /// Exports a session snapshot that includes volume sources + thin viewer state (Phase 2 Task 6).
+    func exportSessionSnapshotJSON() async throws -> String {
+        let viewerStateJSON = try await exportViewerStateJSON()
+        let snapshot = try SessionSnapshotV1.make(volumeSources: volumeSources, viewerStateJSON: viewerStateJSON)
+        let data = try JSONEncoder().encode(snapshot)
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    /// Applies a previously-exported viewer state JSON string (Phase 2 UI: sessions).
+    /// This updates per-volume settings (colormap/opacity/frame) for currently loaded volumes.
+    /// - Parameter json: Viewer state JSON string returned by `exportViewerStateJSON()`.
+    func applyViewerStateJSON(_ json: String) async throws {
+        lastErrorMessage = nil
+        let jsonEscaped = try JavaScriptQuote.jsonStringLiteral(json)
+        try await evaluator.evaluateCommand("window.applyViewerState(\(jsonEscaped))")
+    }
+
+    /// Restores a persisted session JSON string (Phase 2 Task 6).
+    /// Supports both v1 session snapshots and legacy viewer-state-only JSON.
+    func restoreSessionJSON(_ json: String) async throws {
+        lastErrorMessage = nil
+
+        if let data = json.data(using: .utf8),
+           let snapshot = try? JSONDecoder().decode(SessionSnapshotV1.self, from: data) {
+            if !snapshot.volumeSources.isEmpty {
+                let specs = snapshot.volumeSources.map { (url: $0.url, name: $0.name) }
+                try await loadVolumesFromUrls(specs)
+            }
+
+            let viewerStateJSON = try snapshot.viewerStateJSONString()
+            try await applyViewerStateJSON(viewerStateJSON)
+            return
+        }
+
+        // Legacy: thin viewer-state only
+        try await applyViewerStateJSON(json)
     }
 
     /// Syncs the volume list from Niivue JS to Swift.
@@ -303,7 +388,7 @@ final class WebViewManager: NSObject, ObservableObject {
     /// Gets the list of available colormaps.
     /// - Returns: Array of colormap names
     func listColormaps() async throws -> [String] {
-        guard let jsonString = try await evaluator.evaluateString("return JSON.stringify(window.listColormaps())"),
+        guard let jsonString = try await evaluator.evaluateString("JSON.stringify(window.listColormaps())"),
               let data = jsonString.data(using: .utf8) else {
             return []
         }

@@ -5,6 +5,7 @@
 //  Task 3: WKWebView conformance to JavaScriptEvaluating protocol
 //
 
+import Foundation
 import WebKit
 
 extension WKWebView: JavaScriptEvaluating {
@@ -14,8 +15,13 @@ extension WKWebView: JavaScriptEvaluating {
     }
 
     func evaluateString(_ javaScript: String) async throws -> String? {
+        let trimmed = javaScript.trimmingCharacters(in: .whitespacesAndNewlines)
+        precondition(
+            !trimmed.hasPrefix("return "),
+            "evaluateString expects an expression; use callAsyncString for function bodies."
+        )
         // `evaluateJavaScript` returns an `Any?`; keep the public surface typed.
-        try await evaluateJavaScript(javaScript) as? String
+        return try await evaluateJavaScript(javaScript) as? String
     }
 
     func callAsyncString(_ functionBody: String) async throws -> String? {

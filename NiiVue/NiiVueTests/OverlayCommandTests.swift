@@ -23,4 +23,22 @@ final class OverlayCommandTests: XCTestCase {
         try await manager.setOpacity(volumeIndex: 0, opacity: 0.5)
         XCTAssertTrue(js.scripts[0].contains("setOpacity"))
     }
+
+    func testListColormapsParsesJSONAndDoesNotUseReturnPrefix() async throws {
+        let js = MockJavaScriptEvaluator()
+        js.nextString = "[\"gray\",\"hot\"]"
+        let manager = WebViewManager(evaluator: js)
+
+        let colormaps = try await manager.listColormaps()
+
+        XCTAssertEqual(colormaps, ["gray", "hot"])
+        XCTAssertEqual(js.scripts.count, 1)
+        XCTAssertTrue(js.scripts[0].contains("window.listColormaps"))
+        XCTAssertFalse(
+            js.scripts[0]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .hasPrefix("return "),
+            "evaluateString must not receive a function-body 'return ...' script: \(js.scripts[0])"
+        )
+    }
 }

@@ -93,3 +93,87 @@ export function setDrawColormap(nv: Niivue, colormap: string): void {
 export function setClickToSegmentEnabled(nv: Niivue, enabled: boolean): void {
   nv.opts.clickToSegment = enabled
 }
+
+// Phase 2 UI: Import + Sessions helpers
+
+export type UrlNamedItem = {
+  url: string
+  name: string
+}
+
+/**
+ * Add volumes (e.g., label masks / overlay textures) without clearing existing volumes.
+ * @param nv - The Niivue instance
+ * @param volumes - Array of {url, name}
+ */
+export async function addVolumesFromUrls(nv: Niivue, volumes: UrlNamedItem[]): Promise<void> {
+  await nv.addVolumesFromUrl(volumes as any)
+}
+
+/**
+ * Load meshes from URLs.
+ * @param nv - The Niivue instance
+ * @param meshes - Array of {url, name}
+ */
+export async function loadMeshesFromUrls(nv: Niivue, meshes: UrlNamedItem[]): Promise<void> {
+  await nv.loadMeshes(meshes as any)
+}
+
+/**
+ * Export a thin viewer state snapshot that can be persisted on iOS.
+ * Avoids nv.json() because it can include large encoded image blobs.
+ */
+export function exportViewerState(nv: Niivue): string {
+  const volumes = (nv.volumes as any[]).map((v) => ({
+    colormap: v.colormap,
+    opacity: v.opacity,
+    frame4D: v.frame4D ?? 0,
+  }))
+
+  return JSON.stringify({ volumes })
+}
+
+export type ViewerStateVolume = {
+  colormap?: string
+  opacity?: number
+  frame4D?: number
+}
+
+export type ViewerStateSnapshot = {
+  volumes: ViewerStateVolume[]
+}
+
+/**
+ * Apply a viewer state snapshot (previously exported with `exportViewerState`) to the current viewer.
+ * This does not load volumes; it only updates per-volume settings for currently loaded volumes.
+ */
+export function applyViewerState(nv: Niivue, json: string): void {
+  let parsed: any
+  try {
+    parsed = JSON.parse(json)
+  } catch (error) {
+    console.warn('[volumeCommands] Failed to parse viewer state JSON', error)
+    return
+  }
+
+  const snapshot = parsed as ViewerStateSnapshot
+  if (!snapshot || !Array.isArray(snapshot.volumes)) {
+    console.warn('[volumeCommands] Invalid viewer state JSON shape')
+    return
+  }
+
+  snapshot.volumes.forEach((state, index) => {
+    const volume = (nv.volumes as any[])[index]
+    if (!volume || !state) return
+
+    if (typeof state.colormap === 'string') {
+      setColormap(nv, index, state.colormap)
+    }
+    if (typeof state.opacity === 'number') {
+      setOpacity(nv, index, state.opacity)
+    }
+    if (typeof state.frame4D === 'number') {
+      setFrame4D(nv, index, state.frame4D)
+    }
+  })
+}
