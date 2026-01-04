@@ -957,6 +957,7 @@ struct ContentView: View {
                                     Text("Render").tag(SliceTypes.Render.rawValue)
                                 }
                                 .pickerStyle(.menu)
+                                .accessibilityIdentifier("niivue.settings.viewType")
                                 .padding()
                             }
                             //------------------------------------------------------
@@ -1469,6 +1470,8 @@ struct ContentView: View {
                                     .accessibilityIdentifier("niivue.volumeCount")
                                 Text(webViewManager.lastErrorMessage ?? "")
                                     .accessibilityIdentifier("niivue.lastError")
+                                Text(webViewManager.lastClipPlaneDepth.map { String(format: "%.3f", $0) } ?? "")
+                                    .accessibilityIdentifier("niivue.clipPlaneDepth")
                             }
                             .foregroundColor(.white)
                             .padding(8)

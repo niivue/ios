@@ -172,6 +172,55 @@ function App() {
     }
     await nv.attachToCanvas(canvasRef.current);
     nv.onLocationChange = onLocationChange;
+    // Phase 2 UI: Clip plane change notifications (used for 3D slice scrolling + UI test instrumentation)
+    nv.onClipPlaneChange = () => {
+      const anyNv = nv as any
+      const idx = anyNv.uiData?.activeClipPlaneIndex ?? 0
+      const depthAziElev = anyNv.scene?.clipPlaneDepthAziElevs?.[idx]
+      if (depthAziElev && depthAziElev.length >= 1) {
+        postToIOS('clipPlaneChanged', { depth: depthAziElev[0] })
+      }
+    }
+
+    // Phase 2 UI: Enable clip plane automatically when pinching in the 3D render tile,
+    // so users can "scroll" through slices instead of zooming.
+    const canvas = canvasRef.current
+    const enableClipPlaneOnRenderPinchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) {
+        return
+      }
+
+      const rect = canvas.getBoundingClientRect()
+      const clientX = (e.touches[0].clientX + e.touches[1].clientX) / 2
+      const clientY = (e.touches[0].clientY + e.touches[1].clientY) / 2
+      const x = clientX - rect.left
+      const y = clientY - rect.top
+
+      const anyNv = nv as any
+      if (typeof anyNv.inRenderTile !== 'function') {
+        return
+      }
+      if (anyNv.inRenderTile(x, y) < 0) {
+        return
+      }
+
+      const idx = anyNv.uiData?.activeClipPlaneIndex ?? 0
+      const depthAziElev = anyNv.scene?.clipPlaneDepthAziElevs?.[idx]
+      if (!depthAziElev || depthAziElev.length < 3) {
+        return
+      }
+
+      const currentDepth = depthAziElev[0]
+      const clipPlaneIsEnabled = currentDepth < 1.8
+      if (clipPlaneIsEnabled) {
+        return
+      }
+
+      const azimuth = anyNv.scene?.renderAzimuth ?? depthAziElev[1] ?? 0
+      const elevation = anyNv.scene?.renderElevation ?? depthAziElev[2] ?? 0
+      anyNv.setClipPlane([0, azimuth, elevation])
+    }
+    canvas.addEventListener('touchstart', enableClipPlaneOnRenderPinchStart, { capture: true, passive: true })
     // Phase 2 Task 7: Initialize DICOM loader for manifest-based loading
     // Note: The loader receives Array<{name, data: ArrayBuffer}> at runtime; cast to satisfy TypeScript
     nv.useDicomLoader({ loader: (data: any) => dicomLoader(data as any), toExt: 'nii' });

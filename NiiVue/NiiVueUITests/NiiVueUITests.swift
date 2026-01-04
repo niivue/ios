@@ -340,4 +340,54 @@ final class NiiVueUITests: XCTestCase {
 
         XCTAssertTrue(isSwitchOn(drawingEnabled), "Expected 'Drawing enabled' to be ON after enabling click-to-segment.")
     }
+
+    /// 3D Render UX: Pinching in Render view should enable clipping so users can "scroll" through slices.
+    func testRenderPinchEnablesClipPlaneForSliceScroll() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-load-multiple"]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        let countLabel = app.staticTexts["niivue.volumeCount"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 15))
+        XCTAssertTrue(countLabel.waitForExistence(timeout: 15))
+
+        let readyDeadline = Date().addingTimeInterval(30)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready", countLabel.label == "2" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+        XCTAssertEqual(countLabel.label, "2")
+
+        // Switch to Render view so the pinch gesture targets the 3D renderer.
+        app.buttons["niivue.settings"].tap()
+        let viewTypeMenu = app.buttons["niivue.settings.viewType"]
+        XCTAssertTrue(viewTypeMenu.waitForExistence(timeout: 5))
+        viewTypeMenu.tap()
+
+        let renderOption = app.buttons["Render"]
+        XCTAssertTrue(renderOption.waitForExistence(timeout: 5))
+        renderOption.tap()
+        app.buttons["Dismiss"].tap()
+
+        let clipDepthLabel = app.staticTexts["niivue.clipPlaneDepth"]
+        XCTAssertTrue(clipDepthLabel.waitForExistence(timeout: 5))
+        let initialDepthString = clipDepthLabel.label
+
+        // Pinch-in should drive slice-scroll in 3D via the clip plane (not just zoom).
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(webView.waitForExistence(timeout: 10))
+        webView.pinch(withScale: 0.7, velocity: -1)
+
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if !clipDepthLabel.label.isEmpty, clipDepthLabel.label != initialDepthString { break }
+            sleep(1)
+        }
+
+        XCTAssertFalse(clipDepthLabel.label.isEmpty, "Expected clip plane depth to be reported for UI tests.")
+        let depth = Double(clipDepthLabel.label) ?? 999
+        XCTAssertLessThan(depth, 1.8, "Expected clip plane depth < 1.8 (enabled), got '\(clipDepthLabel.label)'.")
+    }
 }

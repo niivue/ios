@@ -31,6 +31,9 @@ final class WebViewManager: NSObject, ObservableObject {
     /// Last location string from Niivue onLocationChange (Phase 2 Task 1: HUD)
     @Published var lastLocationString: String?
 
+    /// Last clip plane depth reported by Niivue (Phase 2 UI: 3D slice scrolling instrumentation)
+    @Published var lastClipPlaneDepth: Double?
+
     // MARK: - Volume Info
 
     struct VolumeInfo: Codable, Equatable {
@@ -127,6 +130,7 @@ final class WebViewManager: NSObject, ObservableObject {
         config.userContentController.add(scriptMessageHandler, name: "finishedLoading")
         config.userContentController.add(scriptMessageHandler, name: "volumeLoaded")
         config.userContentController.add(scriptMessageHandler, name: "locationChange")
+        config.userContentController.add(scriptMessageHandler, name: "clipPlaneChanged")
         config.userContentController.add(scriptMessageHandler, name: "messageHandler")
 
         // WebView configuration
@@ -197,6 +201,19 @@ final class WebViewManager: NSObject, ObservableObject {
                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let locationString = dict["string"] as? String else { return }
             lastLocationString = locationString
+
+        case "clipPlaneChanged":
+            struct ClipPlaneChanged: Codable {
+                let depth: Double
+            }
+
+            guard let jsonString = body as? String,
+                  let data = jsonString.data(using: .utf8) else {
+                return
+            }
+            if let payload = try? JSONDecoder().decode(ClipPlaneChanged.self, from: data) {
+                lastClipPlaneDepth = payload.depth
+            }
 
         default:
             print("[WebViewManager] Unhandled message: \(name)")
