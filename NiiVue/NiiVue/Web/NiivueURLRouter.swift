@@ -13,6 +13,9 @@ struct NiivueURLRouter {
         case dist(path: String)           // Bundle `dist/` (Vite output)
         case sample(path: String)         // Bundle `samples/`
         case importedFile(id: String)     // `files/<id>` (app sandbox)
+        // Phase 2 Task 8: DICOM manifest and file endpoints
+        case dicomManifest(seriesId: String)           // `dicom/<seriesId>/niivue-manifest.txt`
+        case dicomFile(seriesId: String, fileName: String)  // `dicom/<seriesId>/<fileName>`
     }
 
     /// Routes a niivue:// URL to the appropriate handler.
@@ -51,6 +54,21 @@ struct NiivueURLRouter {
                 let path = components.dropFirst().joined(separator: "/")
                 guard !path.isEmpty else { return nil }
                 return .sample(path: path)
+
+            case "dicom":
+                // Phase 2 Task 8: DICOM manifest and file endpoints
+                // dicom/<seriesId>/niivue-manifest.txt → manifest
+                // dicom/<seriesId>/<fileName> → file
+                guard components.count >= 3 else { return nil }
+                let seriesId = components[1]
+                let fileName = components[2]
+                guard !seriesId.isEmpty, !fileName.isEmpty else { return nil }
+
+                if fileName == "niivue-manifest.txt" {
+                    return .dicomManifest(seriesId: seriesId)
+                } else {
+                    return .dicomFile(seriesId: seriesId, fileName: fileName)
+                }
 
             default:
                 // Default: serve from dist/ (Vite output)

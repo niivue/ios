@@ -19,6 +19,10 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
     /// Set this before the WebView starts making requests
     var importedFileStore: ImportedFileStore?
 
+    /// DICOM series store for manifest and file serving
+    /// Set this before the WebView starts making requests
+    var dicomSeriesStore: DicomSeriesStore?
+
     private struct ActiveWork {
         let token: UUID
         let task: Task<Void, Never>
@@ -61,6 +65,12 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
 
         case .importedFile(let id):
             serveImportedFile(id: id, task: urlSchemeTask)
+
+        case .dicomManifest(let seriesId):
+            serveDicomManifest(seriesId: seriesId, task: urlSchemeTask)
+
+        case .dicomFile(let seriesId, let fileName):
+            serveDicomFile(seriesId: seriesId, fileName: fileName, task: urlSchemeTask)
         }
     }
 
@@ -189,6 +199,78 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
         activeWork[taskID] = ActiveWork(token: token, task: work)
     }
 
+    // MARK: - DICOM Serving (Phase 2 Task 8)
+
+    private func serveDicomManifest(seriesId: String, task: WKURLSchemeTask) {
+        let taskID = ObjectIdentifier(task as AnyObject)
+        let token = UUID()
+
+        let work = Task { @MainActor [weak self] in
+            defer {
+                if self?.activeWork[taskID]?.token == token {
+                    self?.activeWork[taskID] = nil
+                }
+            }
+
+            if Task.isCancelled { return }
+            guard let store = self?.dicomSeriesStore else {
+                task.didFailWithError(HandlerError.fileNotFound)
+                return
+            }
+
+            let manifestText = await store.manifestText(for: seriesId)
+            if Task.isCancelled { return }
+
+            guard !manifestText.isEmpty else {
+                task.didFailWithError(HandlerError.fileNotFound)
+                return
+            }
+
+            let data = Data(manifestText.utf8)
+            let requestURL = task.request.url!
+
+            let response = HTTPURLResponse(
+                url: requestURL,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: [
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Content-Length": "\(data.count)"
+                ]
+            )!
+
+            task.didReceive(response)
+            task.didReceive(data)
+            task.didFinish()
+        }
+
+        activeWork[taskID] = ActiveWork(token: token, task: work)
+    }
+
+    private func serveDicomFile(seriesId: String, fileName: String, task: WKURLSchemeTask) {
+        let taskID = ObjectIdentifier(task as AnyObject)
+        let token = UUID()
+
+        let work = Task { @MainActor [weak self] in
+            defer {
+                if self?.activeWork[taskID]?.token == token {
+                    self?.activeWork[taskID] = nil
+                }
+            }
+
+            if Task.isCancelled { return }
+            guard let store = self?.dicomSeriesStore,
+                  let fileURL = await store.url(for: seriesId, fileName: fileName) else {
+                task.didFailWithError(HandlerError.fileNotFound)
+                return
+            }
+            if Task.isCancelled { return }
+            self?.serveFile(at: fileURL, task: task)
+        }
+
+        activeWork[taskID] = ActiveWork(token: token, task: work)
+    }
+
     // MARK: - MIME Type Detection
 
     private func mimeTypeForPath(_ path: String) -> String {
@@ -206,6 +288,8 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
             return "application/gzip"
         case "nii":
             return "application/octet-stream"
+        case "dcm", "dicom":
+            return "application/dicom"
         case "wasm":
             return "application/wasm"
         case "png":

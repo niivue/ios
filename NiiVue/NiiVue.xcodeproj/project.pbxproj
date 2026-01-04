@@ -43,6 +43,8 @@
 		L1M2N3O401234567ABCDEF01 /* Base64FileEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = L1M2N3O401234567ABCDEF02 /* Base64FileEncoder.swift */; };
 		M1N2O3P401234567ABCDEF01 /* SessionSnapshotV1.swift in Sources */ = {isa = PBXBuildFile; fileRef = M1N2O3P401234567ABCDEF02 /* SessionSnapshotV1.swift */; };
 		N1O2P3Q401234567ABCDEF01 /* Base64FileEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = N1O2P3Q401234567ABCDEF02 /* Base64FileEncoderTests.swift */; };
+		O1P2Q3R401234567ABCDEF01 /* DicomSeriesStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = O1P2Q3R401234567ABCDEF02 /* DicomSeriesStoreTests.swift */; };
+		P1Q2R3S401234567ABCDEF01 /* DicomSeriesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -119,6 +121,8 @@
 		L1M2N3O401234567ABCDEF02 /* Base64FileEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Base64FileEncoder.swift; sourceTree = "<group>"; };
 		M1N2O3P401234567ABCDEF02 /* SessionSnapshotV1.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSnapshotV1.swift; sourceTree = "<group>"; };
 		N1O2P3Q401234567ABCDEF02 /* Base64FileEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Base64FileEncoderTests.swift; sourceTree = "<group>"; };
+		O1P2Q3R401234567ABCDEF02 /* DicomSeriesStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomSeriesStoreTests.swift; sourceTree = "<group>"; };
+		P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomSeriesStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -210,6 +214,7 @@
 				H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */,
 				I1J2K3L401234567ABCDEF02 /* SegmentationCommandTests.swift */,
 				J1K2L3M401234567ABCDEF02 /* SessionStoreTests.swift */,
+				O1P2Q3R401234567ABCDEF02 /* DicomSeriesStoreTests.swift */,
 			);
 			path = NiiVueTests;
 			sourceTree = "<group>";
@@ -246,6 +251,7 @@
 				E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */,
 				M1N2O3P401234567ABCDEF02 /* SessionSnapshotV1.swift */,
 				K1L2M3N401234567ABCDEF02 /* SessionStore.swift */,
+				P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -417,6 +423,7 @@
 				E1F2A3B401234567ABCDEF01 /* ImportedFileStore.swift in Sources */,
 				M1N2O3P401234567ABCDEF01 /* SessionSnapshotV1.swift in Sources */,
 				K1L2M3N401234567ABCDEF01 /* SessionStore.swift in Sources */,
+				P1Q2R3S401234567ABCDEF01 /* DicomSeriesStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -439,6 +446,7 @@
 				H1I2J3K401234567ABCDEF01 /* TimeSeriesCommandTests.swift in Sources */,
 				I1J2K3L401234567ABCDEF01 /* SegmentationCommandTests.swift in Sources */,
 				J1K2L3M401234567ABCDEF01 /* SessionStoreTests.swift in Sources */,
+				O1P2Q3R401234567ABCDEF01 /* DicomSeriesStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
