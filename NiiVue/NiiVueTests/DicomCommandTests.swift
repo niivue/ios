@@ -16,7 +16,7 @@ final class DicomCommandTests: XCTestCase {
 
         try await manager.loadDicomSeriesFromManifestURL("niivue://app/dicom/series1/niivue-manifest.txt")
 
-        XCTAssertTrue(js.scripts[0].contains("loadDicomSeriesFromManifest"))
+        XCTAssertTrue(js.scripts[0].contains("return await window.loadDicomSeriesFromManifest"))
     }
 
     func testLoadDicomSeriesEscapesManifestURL() async throws {
@@ -27,5 +27,6 @@ final class DicomCommandTests: XCTestCase {
 
         // The URL should be JSON-escaped to prevent injection
         XCTAssertTrue(js.scripts[0].contains("\\\""))
+        XCTAssertTrue(js.scripts[0].contains("return await window.loadDicomSeriesFromManifest"))
     }
 }

@@ -221,4 +221,44 @@ final class WebViewManagerCommandTests: XCTestCase {
         XCTAssertEqual(decoded.volumeSources, [.init(url: "niivue://app/files/a", name: "a.nii.gz")])
         XCTAssertEqual(decoded.viewerState.volumes.count, 0)
     }
+
+    // MARK: - CT Presets (Adaptive Engine)
+
+    func testSetAutoApplyCTPresetWritesBooleanLiteral() async throws {
+        let js = MockJavaScriptEvaluator()
+        let manager = WebViewManager(evaluator: js)
+
+        try await manager.setAutoApplyCTPreset(enabled: true)
+
+        XCTAssertEqual(js.scripts, ["window.autoApplyCTPreset = true"])
+    }
+
+    func testApplyAdaptiveCTUrinaryPresetBuildsCorrectJSCall() async throws {
+        let js = MockJavaScriptEvaluator()
+        let manager = WebViewManager(evaluator: js)
+
+        try await manager.applyAdaptiveCTUrinaryPreset(volumeIndex: 0)
+
+        XCTAssertEqual(js.scripts, ["window.applyAdaptiveCTUrinaryPreset(0)"])
+    }
+
+    func testApplyCTUrinaryPresetBuildsCorrectJSCallWithEscaping() async throws {
+        let js = MockJavaScriptEvaluator()
+        let manager = WebViewManager(evaluator: js)
+
+        try await manager.applyCTUrinaryPreset(volumeIndex: 0, presetName: "ct_urinary_excretory")
+
+        XCTAssertEqual(js.scripts, ["window.applyCTUrinaryPreset(0, \"ct_urinary_excretory\")"])
+    }
+
+    func testListCTUrinaryPresetsParsesJSONStringArray() async throws {
+        let js = MockJavaScriptEvaluator()
+        js.nextString = "[\"ct_urinary_adaptive\",\"ct_urinary_stones\"]"
+        let manager = WebViewManager(evaluator: js)
+
+        let presets = try await manager.listCTUrinaryPresets()
+
+        XCTAssertEqual(js.scripts, ["JSON.stringify(window.listCTUrinaryPresets())"])
+        XCTAssertEqual(presets, ["ct_urinary_adaptive", "ct_urinary_stones"])
+    }
 }

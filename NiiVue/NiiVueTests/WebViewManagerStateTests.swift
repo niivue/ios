@@ -6,10 +6,41 @@
 //
 
 import XCTest
+import WebKit
 @testable import NiiVue
 
 @MainActor
 final class WebViewManagerStateTests: XCTestCase {
+    func testWebViewInjectsAutoApplyCTPresetUserScriptAtDocumentStart() async throws {
+        let manager = WebViewManager(evaluator: MockJavaScriptEvaluator())
+        let scripts = manager.webView.configuration.userContentController.userScripts
+
+        let script = try XCTUnwrap(scripts.first(where: { $0.source.contains("window.autoApplyCTPreset") }))
+        XCTAssertEqual(script.injectionTime, .atDocumentStart)
+        XCTAssertTrue(script.isForMainFrameOnly)
+    }
+
+    func testUpdateUICTPresetAnalysisUpdatesPublishedState() async throws {
+        let manager = WebViewManager(evaluator: MockJavaScriptEvaluator())
+
+        XCTAssertNil(manager.lastCTPresetAnalysis)
+
+        manager.handleScriptMessage(
+            name: "updateUI",
+            body: """
+            {"type":"ctPresetAnalysis","payload":{"phase":"nephrographic","confidence":0.85,"calMin":60,"calMax":180,"windowWidth":120,"windowLevel":120,"colormap":"ct_urinary_adaptive"}}
+            """
+        )
+
+        let analysis = try XCTUnwrap(manager.lastCTPresetAnalysis)
+        XCTAssertEqual(analysis.phase, "nephrographic")
+        XCTAssertEqual(analysis.colormap, "ct_urinary_adaptive")
+        XCTAssertEqual(analysis.calMin, 60, accuracy: 0.0001)
+        XCTAssertEqual(analysis.calMax, 180, accuracy: 0.0001)
+        XCTAssertEqual(analysis.windowWidth, 120, accuracy: 0.0001)
+        XCTAssertEqual(analysis.windowLevel, 120, accuracy: 0.0001)
+    }
+
     func testInitializationTimeoutSetsErrorMessage() async throws {
         let manager = WebViewManager(evaluator: MockJavaScriptEvaluator(), initializationTimeoutNanoseconds: 10_000_000) // 10ms
         try await Task.sleep(nanoseconds: 50_000_000) // 50ms

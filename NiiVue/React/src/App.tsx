@@ -7,7 +7,14 @@ import DragModeIcon from '@mui/icons-material/AdsClick'; // speed dial icon
 import ViewModeIcon from '@mui/icons-material/GridView'; // view mode speed dial icon
 import './App.css'
 // Task 7 & 7.5: iOS messaging bridge
-import { postToIOS } from './bridge/iosMessaging'
+import { logToIOS, postToIOS } from './bridge/iosMessaging'
+// CT Adaptive Engine (Option B: auto-apply in nv.onImageLoaded gated by window.autoApplyCTPreset)
+import {
+  applyAdaptiveCTUrinaryPreset as nvApplyAdaptiveCTUrinaryPreset,
+  applyCTUrinaryPreset as nvApplyCTUrinaryPreset,
+  listCTUrinaryPresets as nvListCTUrinaryPresets,
+} from './bridge/ctUrinaryPresets'
+import { maybeAutoApplyAdaptiveCTUrinaryPreset } from './bridge/ctAutoApply'
 // Phase 2 Task 3, 4, 5: Volume colormap/opacity/frame/drawing commands
 import {
   setColormap as nvSetColormap,
@@ -26,6 +33,20 @@ import {
 // Phase 2 Task 7: DICOM loader and bridge
 import { dicomLoader } from '@niivue/dicom-loader'
 import { loadDicomSeriesFromManifest as nvLoadDicomSeriesFromManifest } from './bridge/dicomBridge'
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || error.message || String(error)
+  }
+  if (typeof error === 'string') {
+    return error
+  }
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
 
 declare global {
   interface Window {
@@ -59,6 +80,11 @@ declare global {
     setClickToSegmentEnabled: (enabled: boolean) => void,
     // Phase 2 Task 7: DICOM manifest loading
     loadDicomSeriesFromManifest: (manifestUrl: string) => Promise<void>,
+    // CT Adaptive Engine (NEW)
+    autoApplyCTPreset?: boolean,
+    applyAdaptiveCTUrinaryPreset: (volumeIndex: number) => void,
+    listCTUrinaryPresets: () => string[],
+    applyCTUrinaryPreset: (volumeIndex: number, presetName: string) => void,
     // eslint-disable-next-line @typescript-eslint/ban-types
     setCrosshairColor: Function,
     // Task 5: saveDrawing is now async
@@ -83,6 +109,15 @@ declare global {
     setRadiological: Function,
     // eslint-disable-next-line @typescript-eslint/ban-types
     moveCrosshairInVox: Function,
+    // Phase 2 UX: Two-finger pan (native iOS gesture calls into Niivue)
+    beginTwoFingerPan: () => void,
+    pan2DFromScreenDrag: (startX: number, startY: number, endX: number, endY: number) => void,
+    // Phase 2 UX: Viewport interaction (simultaneous pan + zoom)
+    pan2DFromScreenDragIncremental: (startX: number, startY: number, endX: number, endY: number) => void,
+    set2DZoomAtScreenPoint: (scale: number, anchorX: number, anchorY: number) => void,
+    // Phase 2 UX: Window/Level (contrast & brightness)
+    getIntensityWindow: (volumeIndex: number) => string,
+    setIntensityWindow: (windowWidth: number, windowLevel: number, volumeIndex?: number) => void,
     webkit: {
       messageHandlers: {
         updateUI: {
@@ -161,15 +196,152 @@ function App() {
     nv.moveCrosshairInVox(x, y, z)
   }
 
-  function onLocationChange(location) {
-    // Phase 2 Task 1: Send full location info for HUD display
-    postToIOS('locationChange', { string: location.string, mm: location.mm, values: location.values })
+  // Phase 2 UX: Window/Level (cal_min/cal_max) controls
+  function getIntensityWindow(volumeIndex: number = 0): string {
+    const volume: any = nv.volumes[volumeIndex] as any
+    if (!volume) {
+      return JSON.stringify({ windowWidth: 1, windowLevel: 0, calMin: 0, calMax: 1 })
+    }
+
+    const calMin = Number.isFinite(volume.cal_min) ? volume.cal_min : 0
+    const calMax = Number.isFinite(volume.cal_max) ? volume.cal_max : (calMin + 1)
+    const windowWidth = calMax - calMin
+    const windowLevel = (calMax + calMin) / 2
+
+    return JSON.stringify({ windowWidth, windowLevel, calMin, calMax })
+  }
+
+  function setIntensityWindow(windowWidth: number, windowLevel: number, volumeIndex: number = 0): void {
+    const volume: any = nv.volumes[volumeIndex] as any
+    if (!volume) {
+      return
+    }
+
+    const width = Math.max(1, windowWidth)
+    const calMin = windowLevel - width / 2
+    const calMax = windowLevel + width / 2
+
+    volume.cal_min = calMin
+    volume.cal_max = calMax
+
+    const anyNv = nv as any
+    if (typeof anyNv.refreshLayers === 'function') {
+      anyNv.refreshLayers(volume, 0)
+    } else {
+      anyNv.updateGLVolume?.()
+    }
+    anyNv.drawScene?.()
+  }
+
+  // Phase 2 UX: Two-finger pan (2D) via native gesture layer.
+  function beginTwoFingerPan(): void {
+    const anyNv = nv as any
+    if (!anyNv.uiData) {
+      anyNv.uiData = {}
+    }
+    const current = anyNv.scene?.pan2Dxyzmm ?? [0, 0, 0, 1]
+    anyNv.uiData.pan2DxyzmmAtMouseDown = [...current]
+  }
+
+  function pan2DFromScreenDrag(startX: number, startY: number, endX: number, endY: number): void {
+    const anyNv = nv as any
+    if (typeof anyNv.dragForPanZoom !== 'function') {
+      return
+    }
+
+    if (!anyNv.uiData) {
+      anyNv.uiData = {}
+    }
+    if (!anyNv.uiData.pan2DxyzmmAtMouseDown) {
+      const current = anyNv.scene?.pan2Dxyzmm ?? [0, 0, 0, 1]
+      anyNv.uiData.pan2DxyzmmAtMouseDown = [...current]
+    }
+
+    const dpr = anyNv.uiData?.dpr ?? (window.devicePixelRatio || 1)
+    anyNv.dragForPanZoom([startX * dpr, startY * dpr, endX * dpr, endY * dpr])
+    nv.drawScene()
+  }
+
+  function pan2DFromScreenDragIncremental(startX: number, startY: number, endX: number, endY: number): void {
+    const anyNv = nv as any
+    if (typeof anyNv.dragForPanZoom !== 'function') {
+      return
+    }
+
+    if (!anyNv.uiData) {
+      anyNv.uiData = {}
+    }
+
+    const current = anyNv.scene?.pan2Dxyzmm ?? [0, 0, 0, 1]
+    anyNv.uiData.pan2DxyzmmAtMouseDown = [...current]
+
+    const dpr = anyNv.uiData?.dpr ?? (window.devicePixelRatio || 1)
+    anyNv.dragForPanZoom([startX * dpr, startY * dpr, endX * dpr, endY * dpr])
+    nv.drawScene()
+  }
+
+  function set2DZoomAtScreenPoint(scale: number, anchorX: number, anchorY: number): void {
+    const anyNv = nv as any
+    if (typeof anyNv.setPan2Dxyzmm !== 'function' || typeof anyNv.screenXY2mm !== 'function') {
+      return
+    }
+
+    if (!anyNv.uiData) {
+      anyNv.uiData = {}
+    }
+
+    const dpr = anyNv.uiData?.dpr ?? (window.devicePixelRatio || 1)
+    const current = anyNv.scene?.pan2Dxyzmm ?? [0, 0, 0, 1]
+    const currentZoom = typeof current[3] === 'number' ? current[3] : 1
+
+    const clampedScale = Math.max(0.5, Math.min(10.0, scale))
+    const mm = anyNv.screenXY2mm(anchorX * dpr, anchorY * dpr)
+
+    if (!mm || isNaN(mm[0])) {
+      anyNv.setPan2Dxyzmm([current[0], current[1], current[2], clampedScale])
+      return
+    }
+
+    const zoomChange = currentZoom - clampedScale
+    anyNv.setPan2Dxyzmm([
+      current[0] + zoomChange * mm[0],
+      current[1] + zoomChange * mm[1],
+      current[2] + zoomChange * mm[2],
+      clampedScale
+    ])
+  }
+
+  function onLocationChange(location: any) {
+    // Phase 2 Task 1: Send full location info for HUD display (+ vox/dims for native gesture UX)
+    const vox = location?.vox ? Array.from(location.vox) : undefined
+    const anyNv = nv as any
+    const crosshairVox = (typeof anyNv.frac2vox === 'function' && anyNv.scene?.crosshairPos)
+      ? Array.from(anyNv.frac2vox(anyNv.scene.crosshairPos))
+      : undefined
+    const dimsRAS = nv.volumes?.[0]?.dimsRAS ? Array.from(nv.volumes[0].dimsRAS) : undefined
+    postToIOS('locationChange', { string: location.string, mm: location.mm, values: location.values, vox, crosshairVox, dimsRAS })
   }
 
   const setup = async () => {
     if (!canvasRef.current) {
       return;
     }
+
+    const anyWindow = window as any
+    if (!anyWindow.__niivueIOSLoggingInstalled) {
+      anyWindow.__niivueIOSLoggingInstalled = true
+
+      window.addEventListener('error', (event) => {
+        const message = (event as ErrorEvent).error ? describeError((event as ErrorEvent).error) : (event as ErrorEvent).message
+        logToIOS('error', `[window.error] ${message}`)
+      })
+
+      window.addEventListener('unhandledrejection', (event) => {
+        const message = describeError((event as PromiseRejectionEvent).reason)
+        logToIOS('error', `[unhandledrejection] ${message}`)
+      })
+    }
+
     await nv.attachToCanvas(canvasRef.current);
     nv.onLocationChange = onLocationChange;
     // Phase 2 UI: Clip plane change notifications (used for 3D slice scrolling + UI test instrumentation)
@@ -232,6 +404,11 @@ function App() {
         name: volume.name,
         nFrame4D: volume.nFrame4D ?? 1
       })
+      // Ensure native layer receives an initial crosshair/vox snapshot (used for gesture-driven slice scrubbing).
+      ;(nv as any).createOnLocationChange?.()
+
+      // Option B: Auto-apply CT adaptive preset inside JS on image load (Swift controls flag via window.autoApplyCTPreset).
+      maybeAutoApplyAdaptiveCTUrinaryPreset(0)
     }
     // Task 7: Notify Swift that the web view is ready for commands
     postToIOS('finishedLoading', { ready: true })
@@ -338,12 +515,48 @@ function App() {
 
   // Phase 2 Task 7: DICOM manifest loading
   async function loadDicomSeriesFromManifest(manifestUrl: string): Promise<void> {
-    console.log(`[loadDicomSeriesFromManifest] Loading from manifest: ${manifestUrl}`)
-    await nvLoadDicomSeriesFromManifest(nv, manifestUrl)
+    const start = Date.now()
+    logToIOS('info', `[DICOM] Load start: ${manifestUrl}`)
+    try {
+      await nvLoadDicomSeriesFromManifest(nv, manifestUrl)
+      const elapsedMs = Date.now() - start
+      logToIOS('info', `[DICOM] Load succeeded in ${elapsedMs}ms`)
+    } catch (error) {
+      const elapsedMs = Date.now() - start
+      logToIOS('error', `[DICOM] Load failed in ${elapsedMs}ms: ${describeError(error)}`)
+      throw error
+    }
   }
 
   function setCrosshairColor() {
     nv.setCrosshairColor([0,1,0,0.5])
+  }
+
+  // CT Adaptive Engine bindings
+  function applyAdaptiveCTUrinaryPreset(volumeIndex: number): void {
+    try {
+      nvApplyAdaptiveCTUrinaryPreset(nv, volumeIndex)
+      logToIOS('info', `[CTPreset] Applied adaptive preset to volume ${volumeIndex}`)
+    } catch (error) {
+      const message = describeError(error)
+      logToIOS('error', `[CTPreset] Failed to apply adaptive preset: ${message}`)
+      throw error
+    }
+  }
+
+  function listCTUrinaryPresets(): string[] {
+    return nvListCTUrinaryPresets()
+  }
+
+  function applyCTUrinaryPreset(volumeIndex: number, presetName: string): void {
+    try {
+      nvApplyCTUrinaryPreset(nv, volumeIndex, presetName)
+      logToIOS('info', `[CTPreset] Applied preset: ${presetName} to volume ${volumeIndex}`)
+    } catch (error) {
+      const message = describeError(error)
+      logToIOS('error', `[CTPreset] Failed to apply preset: ${message}`)
+      throw error
+    }
   }
 
   // Task 5: Truly async saveDrawing
@@ -374,6 +587,10 @@ function App() {
 
   React.useEffect(() => {
     setup();
+    const anyWindow = window as any
+    if (typeof anyWindow.autoApplyCTPreset !== 'boolean') {
+      anyWindow.autoApplyCTPreset = false
+    }
     window.loadBase64Image = loadBase64Image
     window.loadImageFromUrl = loadImageFromUrl  // Task 10: URL-based loading
     window.loadVolumesFromUrls = loadVolumesFromUrls  // Phase 2 Task 2: Multi-volume
@@ -404,6 +621,15 @@ function App() {
     window.setOrientationCube = setOrientationCube
     window.setRadiological = setRadiological
     window.moveCrosshairInVox = moveCrosshairInVox
+    window.getIntensityWindow = getIntensityWindow
+    window.setIntensityWindow = setIntensityWindow
+    window.beginTwoFingerPan = beginTwoFingerPan
+    window.pan2DFromScreenDrag = pan2DFromScreenDrag
+    window.pan2DFromScreenDragIncremental = pan2DFromScreenDragIncremental
+    window.set2DZoomAtScreenPoint = set2DZoomAtScreenPoint
+    window.applyAdaptiveCTUrinaryPreset = applyAdaptiveCTUrinaryPreset
+    window.listCTUrinaryPresets = listCTUrinaryPresets
+    window.applyCTUrinaryPreset = applyCTUrinaryPreset
     // Note: finishedLoading is now called in setup() after canvas attachment
   }, []);
 

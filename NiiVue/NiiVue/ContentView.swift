@@ -11,6 +11,7 @@ import SwiftUI
 import WebKit
 import Foundation
 import UniformTypeIdentifiers
+import UIKit
 
 typealias MessageCallback = (String) -> Void
 
@@ -212,10 +213,413 @@ struct WebView: UIViewRepresentable {
     }
 }
 
+// MARK: - 2D Gestures: Viewport Interaction (2-Finger Pan + Pinch Zoom)
+
+/// Unified 2-finger navigation handler that supports **simultaneous** pan + zoom (Photos/PACS style).
+/// - Pan: `offset += translation` (reset translation each step)
+/// - Pinch: `scale *= recognizer.scale` (reset recognizer.scale each step), clamped to `[0.5, 10.0]`
+struct ViewportInteractionHandler: UIViewRepresentable {
+    enum InstallTarget: Equatable {
+        case webView
+        case installerView
+    }
+
+    @Binding var offset: CGSize
+    @Binding var scale: CGFloat
+    var installTarget: InstallTarget = .webView
+    var accessibilityIdentifier: String? = nil
+    var isEnabled: Bool = true
+    var isOneFingerPanEnabled: Bool = true
+    var simulateTwoFingerPanWithOneFinger: Bool = false
+    var pinchSensitivityExponent: CGFloat = 1.0
+    var onInstalled: ((String) -> Void)? = nil
+    var onPanBegan: ((CGPoint) -> Void)? = nil
+    var onPanChanged: ((CGPoint, CGPoint, CGSize) -> Void)? = nil
+    var onPanEnded: (() -> Void)? = nil
+    var onPinchBegan: ((CGPoint) -> Void)? = nil
+    var onPinchChanged: ((CGPoint, CGFloat) -> Void)? = nil
+    var onPinchEnded: (() -> Void)? = nil
+    var onOneFingerPanBegan: ((CGPoint) -> Void)? = nil
+    var onOneFingerPanChanged: ((CGPoint, CGSize, CGSize) -> Void)? = nil
+    var onOneFingerPanEnded: (() -> Void)? = nil
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            offset: $offset,
+            scale: $scale,
+            installTarget: installTarget,
+            simulateTwoFingerPanWithOneFinger: simulateTwoFingerPanWithOneFinger,
+            pinchSensitivityExponent: pinchSensitivityExponent,
+            onInstalled: onInstalled,
+            onPanBegan: onPanBegan,
+            onPanChanged: onPanChanged,
+            onPanEnded: onPanEnded,
+            onPinchBegan: onPinchBegan,
+            onPinchChanged: onPinchChanged,
+            onPinchEnded: onPinchEnded
+            ,
+            onOneFingerPanBegan: onOneFingerPanBegan,
+            onOneFingerPanChanged: onOneFingerPanChanged,
+            onOneFingerPanEnded: onOneFingerPanEnded
+        )
+    }
+
+    private final class InstallerView: UIView {
+        var onDidMoveToSuperview: ((UIView?) -> Void)?
+
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            onDidMoveToSuperview?(superview)
+        }
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = InstallerView(frame: .zero)
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = installTarget == .installerView
+        if let accessibilityIdentifier {
+            view.isAccessibilityElement = true
+            view.accessibilityIdentifier = accessibilityIdentifier
+        }
+        view.onDidMoveToSuperview = { [weak coordinator = context.coordinator, weak view] _ in
+            guard let view else { return }
+            coordinator?.installRecognizersIfNeeded(from: view)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        uiView.isUserInteractionEnabled = installTarget == .installerView
+        uiView.isAccessibilityElement = accessibilityIdentifier != nil
+        uiView.accessibilityIdentifier = accessibilityIdentifier
+        context.coordinator.setConfiguration(
+            isEnabled: isEnabled,
+            isOneFingerPanEnabled: isOneFingerPanEnabled,
+            simulateTwoFingerPanWithOneFinger: simulateTwoFingerPanWithOneFinger,
+            installTarget: installTarget,
+            pinchSensitivityExponent: pinchSensitivityExponent
+        )
+        context.coordinator.syncExternalState(offset: offset, scale: scale)
+
+        DispatchQueue.main.async { [weak coordinator = context.coordinator, weak uiView] in
+            guard let coordinator, let uiView else { return }
+            coordinator.installRecognizersIfNeeded(from: uiView)
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let offsetBinding: Binding<CGSize>
+        private let scaleBinding: Binding<CGFloat>
+        private let onInstalled: ((String) -> Void)?
+        private let onPanBegan: ((CGPoint) -> Void)?
+        private let onPanChanged: ((CGPoint, CGPoint, CGSize) -> Void)?
+        private let onPanEnded: (() -> Void)?
+        private let onPinchBegan: ((CGPoint) -> Void)?
+        private let onPinchChanged: ((CGPoint, CGFloat) -> Void)?
+        private let onPinchEnded: (() -> Void)?
+        private let onOneFingerPanBegan: ((CGPoint) -> Void)?
+        private let onOneFingerPanChanged: ((CGPoint, CGSize, CGSize) -> Void)?
+        private let onOneFingerPanEnded: (() -> Void)?
+        private var installTarget: InstallTarget
+
+        private weak var installedOnView: UIView?
+        private var twoFingerPanRecognizer: UIPanGestureRecognizer?
+        private var pinchRecognizer: UIPinchGestureRecognizer?
+        private var oneFingerDragRecognizer: UILongPressGestureRecognizer?
+
+        private var oneFingerDragStartLocation: CGPoint?
+        private var oneFingerDragLastLocation: CGPoint?
+        private var oneFingerDragLastTimestamp: TimeInterval?
+
+        private var isEnabled: Bool = true
+        private var isOneFingerPanEnabled: Bool = true
+        private var simulateTwoFingerPanWithOneFinger: Bool = false
+        private var pinchSensitivityExponent: CGFloat = 1.0
+        private var lastSyncedOffset: CGSize = .zero
+        private var lastSyncedScale: CGFloat = 1.0
+
+        private let minScale: CGFloat = 0.5
+        private let maxScale: CGFloat = 10.0
+
+        init(
+            offset: Binding<CGSize>,
+            scale: Binding<CGFloat>,
+            installTarget: InstallTarget,
+            simulateTwoFingerPanWithOneFinger: Bool,
+            pinchSensitivityExponent: CGFloat,
+            onInstalled: ((String) -> Void)?,
+            onPanBegan: ((CGPoint) -> Void)?,
+            onPanChanged: ((CGPoint, CGPoint, CGSize) -> Void)?,
+            onPanEnded: (() -> Void)?,
+            onPinchBegan: ((CGPoint) -> Void)?,
+            onPinchChanged: ((CGPoint, CGFloat) -> Void)?,
+            onPinchEnded: (() -> Void)?,
+            onOneFingerPanBegan: ((CGPoint) -> Void)?,
+            onOneFingerPanChanged: ((CGPoint, CGSize, CGSize) -> Void)?,
+            onOneFingerPanEnded: (() -> Void)?
+        ) {
+            self.offsetBinding = offset
+            self.scaleBinding = scale
+            self.installTarget = installTarget
+            self.simulateTwoFingerPanWithOneFinger = simulateTwoFingerPanWithOneFinger
+            self.pinchSensitivityExponent = pinchSensitivityExponent
+            self.onInstalled = onInstalled
+            self.onPanBegan = onPanBegan
+            self.onPanChanged = onPanChanged
+            self.onPanEnded = onPanEnded
+            self.onPinchBegan = onPinchBegan
+            self.onPinchChanged = onPinchChanged
+            self.onPinchEnded = onPinchEnded
+            self.onOneFingerPanBegan = onOneFingerPanBegan
+            self.onOneFingerPanChanged = onOneFingerPanChanged
+            self.onOneFingerPanEnded = onOneFingerPanEnded
+            super.init()
+            self.lastSyncedOffset = offset.wrappedValue
+            self.lastSyncedScale = scale.wrappedValue
+        }
+
+        func setConfiguration(
+            isEnabled: Bool,
+            isOneFingerPanEnabled: Bool,
+            simulateTwoFingerPanWithOneFinger: Bool,
+            installTarget: InstallTarget,
+            pinchSensitivityExponent: CGFloat
+        ) {
+            self.isEnabled = isEnabled
+            self.isOneFingerPanEnabled = isOneFingerPanEnabled
+            self.simulateTwoFingerPanWithOneFinger = simulateTwoFingerPanWithOneFinger
+            self.installTarget = installTarget
+            self.pinchSensitivityExponent = pinchSensitivityExponent
+            twoFingerPanRecognizer?.isEnabled = isEnabled
+            pinchRecognizer?.isEnabled = isEnabled
+            oneFingerDragRecognizer?.isEnabled = isEnabled && isOneFingerPanEnabled
+        }
+
+        func syncExternalState(offset: CGSize, scale: CGFloat) {
+            if offset != lastSyncedOffset {
+                lastSyncedOffset = offset
+            }
+            if scale != lastSyncedScale {
+                lastSyncedScale = scale
+            }
+        }
+
+        private func findWebView(in view: UIView) -> WKWebView? {
+            if let view = view as? WKWebView { return view }
+            for child in view.subviews {
+                if let match = findWebView(in: child) {
+                    return match
+                }
+            }
+            return nil
+        }
+
+        private func resolveInstallTarget(from installerView: UIView) -> UIView? {
+            if installTarget == .installerView {
+                return installerView
+            }
+
+            var current: UIView? = installerView
+            for _ in 0..<12 {
+                guard let currentView = current else { break }
+                if let webView = findWebView(in: currentView) {
+                    return webView
+                }
+                current = currentView.superview
+            }
+            return installerView.superview
+        }
+
+        func installRecognizersIfNeeded(from installerView: UIView) {
+            guard let view = resolveInstallTarget(from: installerView) else { return }
+            guard installedOnView !== view else { return }
+
+            if let installedOnView {
+                if let twoFingerPanRecognizer {
+                    installedOnView.removeGestureRecognizer(twoFingerPanRecognizer)
+                }
+                if let pinchRecognizer {
+                    installedOnView.removeGestureRecognizer(pinchRecognizer)
+                }
+                if let oneFingerDragRecognizer {
+                    installedOnView.removeGestureRecognizer(oneFingerDragRecognizer)
+                }
+            }
+
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            pan.minimumNumberOfTouches = 2
+            pan.maximumNumberOfTouches = 2
+            pan.allowedScrollTypesMask = .all
+            pan.cancelsTouchesInView = true
+            pan.delegate = self
+            view.addGestureRecognizer(pan)
+            self.twoFingerPanRecognizer = pan
+
+            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+            pinch.cancelsTouchesInView = true
+            pinch.delegate = self
+            view.addGestureRecognizer(pinch)
+            self.pinchRecognizer = pinch
+
+            let oneFingerDrag = UILongPressGestureRecognizer(target: self, action: #selector(handleOneFingerDrag(_:)))
+            oneFingerDrag.minimumPressDuration = 0
+            oneFingerDrag.allowableMovement = 10_000
+            oneFingerDrag.numberOfTouchesRequired = 1
+            oneFingerDrag.cancelsTouchesInView = true
+            oneFingerDrag.delegate = self
+            view.addGestureRecognizer(oneFingerDrag)
+            self.oneFingerDragRecognizer = oneFingerDrag
+
+            installedOnView = view
+            setConfiguration(
+                isEnabled: isEnabled,
+                isOneFingerPanEnabled: isOneFingerPanEnabled,
+                simulateTwoFingerPanWithOneFinger: simulateTwoFingerPanWithOneFinger,
+                installTarget: installTarget,
+                pinchSensitivityExponent: pinchSensitivityExponent
+            )
+            onInstalled?(String(describing: type(of: view)))
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
+        }
+
+        @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard isEnabled, let view = recognizer.view else { return }
+
+            switch recognizer.state {
+            case .began:
+                onPanBegan?(recognizer.location(in: view))
+
+            case .changed:
+                let translation = recognizer.translation(in: view)
+                recognizer.setTranslation(.zero, in: view)
+
+                var newOffset = offsetBinding.wrappedValue
+                newOffset.width += translation.x
+                newOffset.height += translation.y
+                offsetBinding.wrappedValue = newOffset
+                lastSyncedOffset = newOffset
+
+                let end = recognizer.location(in: view)
+                let start = CGPoint(x: end.x - translation.x, y: end.y - translation.y)
+                onPanChanged?(start, end, newOffset)
+
+            case .ended, .cancelled, .failed:
+                onPanEnded?()
+
+            default:
+                break
+            }
+        }
+
+        @objc private func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+            guard isEnabled, let view = recognizer.view else { return }
+
+            switch recognizer.state {
+            case .began:
+                onPinchBegan?(recognizer.location(in: view))
+
+            case .changed:
+                let exponent = max(0.1, min(1.0, pinchSensitivityExponent))
+                let adjusted = pow(Double(recognizer.scale), Double(exponent))
+                var newScale = scaleBinding.wrappedValue * CGFloat(adjusted)
+                recognizer.scale = 1.0
+                newScale = min(max(newScale, minScale), maxScale)
+                scaleBinding.wrappedValue = newScale
+                lastSyncedScale = newScale
+                onPinchChanged?(recognizer.location(in: view), newScale)
+
+            case .ended, .cancelled, .failed:
+                onPinchEnded?()
+
+            default:
+                break
+            }
+        }
+
+        @objc private func handleOneFingerDrag(_ recognizer: UILongPressGestureRecognizer) {
+            guard isEnabled, let view = recognizer.view else { return }
+
+            guard isOneFingerPanEnabled else { return }
+
+            let location = recognizer.location(in: view)
+            let now = ProcessInfo.processInfo.systemUptime
+
+            switch recognizer.state {
+            case .began:
+                oneFingerDragStartLocation = location
+                oneFingerDragLastLocation = location
+                oneFingerDragLastTimestamp = now
+                if simulateTwoFingerPanWithOneFinger {
+                    onPanBegan?(location)
+                } else {
+                    onOneFingerPanBegan?(location)
+                }
+
+            case .changed:
+                guard let start = oneFingerDragStartLocation,
+                      let last = oneFingerDragLastLocation,
+                      let lastTimestamp = oneFingerDragLastTimestamp else { return }
+
+                let translation = CGSize(width: location.x - start.x, height: location.y - start.y)
+                let delta = CGSize(width: location.x - last.x, height: location.y - last.y)
+                let dt = max(now - lastTimestamp, 0.0001)
+                let velocity = CGSize(width: delta.width / dt, height: delta.height / dt)
+
+                oneFingerDragLastLocation = location
+                oneFingerDragLastTimestamp = now
+
+                if simulateTwoFingerPanWithOneFinger {
+                    var newOffset = offsetBinding.wrappedValue
+                    newOffset.width += delta.width
+                    newOffset.height += delta.height
+                    offsetBinding.wrappedValue = newOffset
+                    lastSyncedOffset = newOffset
+
+                    let startPoint = CGPoint(x: location.x - delta.width, y: location.y - delta.height)
+                    onPanChanged?(startPoint, location, newOffset)
+                } else {
+                    onOneFingerPanChanged?(location, translation, velocity)
+                }
+
+            case .ended, .cancelled, .failed:
+                oneFingerDragStartLocation = nil
+                oneFingerDragLastLocation = nil
+                oneFingerDragLastTimestamp = nil
+                if simulateTwoFingerPanWithOneFinger {
+                    onPanEnded?()
+                } else {
+                    onOneFingerPanEnded?()
+                }
+
+            default:
+                break
+            }
+        }
+    }
+}
+
 
 struct ContentView: View {
     @EnvironmentObject var sharedData: SharedData
-    @StateObject private var webViewManager = WebViewManager()
+
+    private static let autoApplyCTPresetUserDefaultsKey = "autoApplyCTPreset"
+    private static let fallbackCTUrinaryPresets: [String] = [
+        "ct_urinary_adaptive",
+        "ct_urinary_combined",
+        "ct_urinary_excretory",
+        "ct_urinary_stones"
+    ]
+
+    @AppStorage(Self.autoApplyCTPresetUserDefaultsKey) private var autoApplyCTPreset: Bool = true
+    @StateObject private var webViewManager: WebViewManager
+
+    init() {
+        let storedAutoApply = UserDefaults.standard.object(forKey: Self.autoApplyCTPresetUserDefaultsKey) as? Bool ?? true
+        _webViewManager = StateObject(wrappedValue: WebViewManager(autoApplyCTPresetDefault: storedAutoApply))
+    }
 
     @State private var documentPickerPresented = false
     @State private var segmentationAssetsPickerPresented = false
@@ -243,6 +647,14 @@ struct ContentView: View {
     @State private var sessionsStatusMessage: String?
     @State private var sessionsInProgress = false
     @State private var sessionIDs: [String] = []
+
+    // MARK: - CT Presets (CT Adaptive Engine)
+
+    @State private var ctPresetSheetPresented = false
+    @State private var ctPresetStatusMessage: String?
+    @State private var selectedCTPreset: String = "ct_urinary_adaptive"
+    @State private var availableCTPresets: [String] = []
+
     @State private var pickedDocumentURL: URL?
     @State private var base64EncodedString: String?
     @State private var sliceType = SliceTypes.Multiplanar.rawValue // default sliceType is multiplanar
@@ -262,6 +674,23 @@ struct ContentView: View {
     @State private var decrementText = ""
     @State private var sliceTypeText = ""
 
+    // Phase 2 UX: 2D viewport interaction state (2-finger pan + pinch zoom).
+    @State private var twoFingerPanOffset: CGSize = .zero
+    @State private var twoFingerPanEventCount: Int = 0
+    @State private var twoFingerPanInstallCount: Int = 0
+    @State private var twoFingerPanInstalledViewType: String = ""
+    @State private var twoFingerViewportScale: CGFloat = 1.0
+    @State private var twoFingerPinchEventCount: Int = 0
+
+    // Phase 2 UX: 2D tool mode (1-finger scroll vs. window/level).
+    @State private var toolMode: ToolMode = .scroll
+    @State private var windowWidth: Double = 1.0
+    @State private var windowLevel: Double = 0.0
+    @State private var windowLevelEventCount: Int = 0
+    @State private var windowLevelIsDragging: Bool = false
+    @State private var windowLevelDragStartWindowWidth: Double?
+    @State private var windowLevelDragStartWindowLevel: Double?
+
     /// Phase 2 Task 2: Check if we should load multiple volumes for UI testing
     private var isUITestLoadMultiple: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-test-load-multiple")
@@ -269,6 +698,48 @@ struct ContentView: View {
 
     private var isUITestSessionsTemp: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-test-sessions-temp")
+    }
+
+    private var isUITestSimulateTwoFingerPan: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-simulate-two-finger-pan")
+    }
+
+    private var isUITestSimulateTwoFingerPinch: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-simulate-two-finger-pinch")
+    }
+
+    private var uiTestDicomRelativeDirectory: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--ui-test-dicom-dir") else { return nil }
+        let valueIndex = args.index(after: index)
+        guard valueIndex < args.endIndex else { return nil }
+        let value = args[valueIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private var isUITestMode: Bool {
+        isUITestLoadMultiple ||
+            isUITestSessionsTemp ||
+            isUITestSimulateTwoFingerPan ||
+            isUITestSimulateTwoFingerPinch ||
+            uiTestDicomRelativeDirectory != nil
+    }
+
+    private var is2DSliceType: Bool {
+        sliceType == SliceTypes.Axial.rawValue ||
+            sliceType == SliceTypes.Coronal.rawValue ||
+            sliceType == SliceTypes.Sagittal.rawValue
+    }
+
+    private var is2DWebViewSliceType: Bool {
+        webViewManager.currentSliceType == SliceTypes.Axial.rawValue ||
+            webViewManager.currentSliceType == SliceTypes.Coronal.rawValue ||
+            webViewManager.currentSliceType == SliceTypes.Sagittal.rawValue
+    }
+
+    enum ToolMode: Int {
+        case scroll = 0
+        case windowLevel = 1
     }
 
     enum SliceTypes: Int, CaseIterable, Identifiable {
@@ -316,6 +787,7 @@ struct ContentView: View {
 #endif
 
     private let maxBase64FallbackBytes = 25 * 1024 * 1024
+    private let windowLevelPointsPerHU: Double = 2.0
 
     private func importSegmentationAssets(from pickedURLs: [URL]) {
         Task {
@@ -381,11 +853,57 @@ struct ContentView: View {
 
     // MARK: - Phase 2 Task 9: DICOM import
 
+    private func collectDicomFiles(from pickedURLs: [URL]) -> [URL] {
+        let fileManager = FileManager.default
+
+        func isDicomCandidateFile(_ url: URL) -> Bool {
+            let ext = url.pathExtension.lowercased()
+            return ext == "dcm" || ext == "dicom" || ext.isEmpty
+        }
+
+        func isDirectory(_ url: URL) -> Bool {
+            (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }
+
+        func isRegularFile(_ url: URL) -> Bool {
+            // Treat unknown as a file, since some providers may omit this.
+            (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) != false
+        }
+
+        var results: [URL] = []
+
+        for url in pickedURLs {
+            if isDirectory(url) {
+                guard let enumerator = fileManager.enumerator(
+                    at: url,
+                    includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                ) else {
+                    continue
+                }
+
+                for case let entryURL as URL in enumerator {
+                    if isDirectory(entryURL) { continue }
+                    guard isRegularFile(entryURL) else { continue }
+                    guard isDicomCandidateFile(entryURL) else { continue }
+                    results.append(entryURL)
+                }
+            } else {
+                guard isRegularFile(url) else { continue }
+                guard isDicomCandidateFile(url) else { continue }
+                results.append(url)
+            }
+        }
+
+        // Deterministic order helps reproducibility (and matches manifest ordering).
+        return results.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
     private func importDicomSeries(from pickedURLs: [URL]) {
         Task {
             await MainActor.run {
                 dicomImportInProgress = true
-                dicomImportStatusMessage = "Importing \(pickedURLs.count) DICOM file(s)…"
+                dicomImportStatusMessage = "Scanning selection…"
             }
 
             defer {
@@ -394,17 +912,31 @@ struct ContentView: View {
                 }
             }
 
-            // Filter to DICOM files (.dcm, .dicom, or files without extension)
-            let dicomURLs = pickedURLs.filter { url in
-                let ext = url.pathExtension.lowercased()
-                return ext == "dcm" || ext == "dicom" || ext.isEmpty
-            }
+            // Expand folders and filter to DICOM candidates (.dcm, .dicom, or files without extension).
+            let dicomURLs = collectDicomFiles(from: pickedURLs)
 
             guard !dicomURLs.isEmpty else {
                 await MainActor.run {
                     dicomImportStatusMessage = "No DICOM files found in selection."
                 }
                 return
+            }
+
+            let duplicates = Dictionary(grouping: dicomURLs, by: { $0.lastPathComponent })
+                .filter { $0.value.count > 1 }
+                .map(\.key)
+
+            guard duplicates.isEmpty else {
+                await MainActor.run {
+                    let message = "Selection contains duplicate filenames (unsupported): \(duplicates.sorted().joined(separator: ", "))."
+                    dicomImportStatusMessage = message
+                    webViewManager.lastErrorMessage = message
+                }
+                return
+            }
+
+            await MainActor.run {
+                dicomImportStatusMessage = "Importing \(dicomURLs.count) DICOM file(s)…"
             }
 
             let libraryDir = FileImportService.defaultLibraryDirectory()
@@ -453,7 +985,85 @@ struct ContentView: View {
                 }
             } catch {
                 await MainActor.run {
-                    dicomImportStatusMessage = "Failed to load DICOM series: \(error.localizedDescription)"
+                    let message = "Failed to load DICOM series: \(error.localizedDescription)"
+                    dicomImportStatusMessage = message
+                    webViewManager.lastErrorMessage = message
+                }
+            }
+        }
+    }
+
+    // MARK: - CT Presets (CT Adaptive Engine)
+
+    @MainActor
+    private func loadCTUrinaryPresetsIfPossible() async {
+        if availableCTPresets.isEmpty {
+            availableCTPresets = Self.fallbackCTUrinaryPresets
+        }
+
+        guard webViewManager.isReady else { return }
+
+        do {
+            let presets = try await webViewManager.listCTUrinaryPresets()
+            availableCTPresets = presets.isEmpty ? Self.fallbackCTUrinaryPresets : presets
+            ctPresetStatusMessage = nil
+        } catch {
+            ctPresetStatusMessage = "Failed to load CT presets: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    private func syncAutoApplyCTPresetToJS(_ enabled: Bool) {
+        guard webViewManager.isReady else { return }
+        Task {
+            do {
+                try await webViewManager.setAutoApplyCTPreset(enabled: enabled)
+            } catch {
+                await MainActor.run {
+                    ctPresetStatusMessage = "Failed to update auto-apply: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func displayNameForCTPreset(_ preset: String) -> String {
+        switch preset {
+        case "ct_urinary_adaptive":
+            return "Adaptive (Auto-Detect)"
+        case "ct_urinary_combined":
+            return "Vessels + Parenchyma"
+        case "ct_urinary_excretory":
+            return "Excretory Phase"
+        case "ct_urinary_stones":
+            return "Stone Detection"
+        default:
+            return preset.capitalized.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+
+    @MainActor
+    private func applyAdaptiveCTPresetNowIfPossible() {
+        guard webViewManager.volumes.isEmpty == false else { return }
+        Task {
+            do {
+                try await webViewManager.applyAdaptiveCTUrinaryPreset(volumeIndex: 0)
+            } catch {
+                await MainActor.run {
+                    ctPresetStatusMessage = "Failed to apply adaptive preset: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func applySelectedCTPresetNow() {
+        guard webViewManager.volumes.isEmpty == false else { return }
+        Task {
+            do {
+                try await webViewManager.applyCTUrinaryPreset(volumeIndex: 0, presetName: selectedCTPreset)
+            } catch {
+                await MainActor.run {
+                    ctPresetStatusMessage = "Failed to apply CT preset: \(error.localizedDescription)"
                 }
             }
         }
@@ -783,21 +1393,36 @@ struct ContentView: View {
 
     @ViewBuilder
     var hudOverlay: some View {
-        if let locationString = webViewManager.lastLocationString {
+        if webViewManager.lastLocationString != nil || windowLevelIsDragging {
             VStack {
                 HStack {
-                    Text(locationString)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(.white)
-                        .padding(6)
-                        .background(Color.black.opacity(0.6))
-                        .cornerRadius(4)
-                        .accessibilityIdentifier("niivue.hud")
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let locationString = webViewManager.lastLocationString {
+                            Text(locationString)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(6)
+                                .background(Color.black.opacity(0.6))
+                                .cornerRadius(4)
+                                .accessibilityIdentifier("niivue.hud")
+                        }
+
+                        if windowLevelIsDragging {
+                            Text("WW \(Int(windowWidth.rounded()))  WL \(Int(windowLevel.rounded()))")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(6)
+                                .background(Color.black.opacity(0.6))
+                                .cornerRadius(4)
+                                .accessibilityIdentifier("niivue.windowLevelOverlay")
+                        }
+                    }
                     Spacer()
                 }
                 Spacer()
             }
             .padding(8)
+            .allowsHitTesting(false)
         }
     }
 
@@ -918,6 +1543,44 @@ struct ContentView: View {
                         }
                     }
                 } // add image (plus) sheet end
+                // -------------------------------------------------------------
+                // 2D tool mode: Window/Level (contrast/brightness) vs Stack Scroll
+                Button(action: {
+                    guard sliceType == SliceTypes.Axial.rawValue || sliceType == SliceTypes.Coronal.rawValue || sliceType == SliceTypes.Sagittal.rawValue else {
+                        toolMode = .scroll
+                        return
+                    }
+
+                    toolMode = (toolMode == .windowLevel) ? .scroll : .windowLevel
+                    windowLevelIsDragging = false
+                    windowLevelDragStartWindowWidth = nil
+                    windowLevelDragStartWindowLevel = nil
+                    windowLevelEventCount = 0
+
+                    // Our 2D gesture system owns 1-finger drags (stack scroll + window/level).
+                    // Disable Niivue's internal drag handling so the underlying web content
+                    // doesn't also move the crosshair while the native layer is processing drags.
+                    Task {
+                        try? await webViewManager.setDragMode(dragMode: DragTypes.None.rawValue)
+                    }
+
+                    if toolMode == .windowLevel {
+                        Task {
+                            if let updated = try? await webViewManager.getIntensityWindow(volumeIndex: 0) {
+                                await MainActor.run {
+                                    windowWidth = max(1.0, updated.windowWidth)
+                                    windowLevel = updated.windowLevel
+                                }
+                            }
+                        }
+                    }
+                }) {
+                    Image(systemName: "sun.max")
+                        .padding()
+                        .foregroundColor(toolMode == .windowLevel ? .yellow : .white)
+                }
+                .accessibilityIdentifier("niivue.tool.windowLevel")
+                .disabled(!(sliceType == SliceTypes.Axial.rawValue || sliceType == SliceTypes.Coronal.rawValue || sliceType == SliceTypes.Sagittal.rawValue))
                 // -------------------------------------------------------------
                 // adjust settings button
                 Button(action: {
@@ -1298,6 +1961,113 @@ struct ContentView: View {
                     }
                 }
 
+                // CT Adaptive Engine UI: Dedicated CT Presets sheet
+                Button(action: {
+                    ctPresetSheetPresented = true
+                }) {
+                    Image(systemName: "chart.bar.doc.horizontal")
+                        .padding()
+                        .foregroundColor(.white)
+                }
+                .accessibilityIdentifier("niivue.ctPresets")
+                .sheet(isPresented: $ctPresetSheetPresented) {
+                    NavigationStack {
+                        VStack(spacing: 0) {
+                            AccessibilityMarkerView(identifier: "niivue.ctPresetSheet")
+                                .frame(width: 1, height: 1)
+                                .opacity(0.01)
+
+                            if let message = ctPresetStatusMessage {
+                                Text(message)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.leading)
+                                    .accessibilityIdentifier("niivue.ctPresetStatus")
+                            }
+
+                            Form {
+                                if let analysis = webViewManager.lastCTPresetAnalysis {
+                                    Section {
+                                        HStack {
+                                            Text("Phase")
+                                            Spacer()
+                                            Text(analysis.phase)
+                                                .font(.system(.caption, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                                .accessibilityIdentifier("niivue.ctPresetAnalysis.phase")
+                                        }
+                                        HStack {
+                                            Text("Confidence")
+                                            Spacer()
+                                            Text(String(format: "%.2f", analysis.confidence))
+                                                .font(.system(.caption, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        HStack {
+                                            Text("Window")
+                                            Spacer()
+                                            Text(String(format: "%.0f…%.0f HU", analysis.calMin, analysis.calMax))
+                                                .font(.system(.caption, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    } header: {
+                                        Text("Last Analysis")
+                                    }
+                                }
+
+                                Section {
+                                    Toggle("Auto-apply adaptive preset", isOn: $autoApplyCTPreset)
+                                        .accessibilityIdentifier("niivue.ctPresetAutoApply")
+                                        .onChange(of: autoApplyCTPreset) { newValue in
+                                            syncAutoApplyCTPresetToJS(newValue)
+                                            if newValue {
+                                                applyAdaptiveCTPresetNowIfPossible()
+                                            }
+                                        }
+                                } header: {
+                                    Text("Automatic Detection")
+                                } footer: {
+                                    Text("Automatically applies the adaptive CT preset when new volumes finish loading.")
+                                        .font(.caption)
+                                }
+
+                                Section {
+                                    Picker("Preset", selection: $selectedCTPreset) {
+                                        ForEach(availableCTPresets.isEmpty ? Self.fallbackCTUrinaryPresets : availableCTPresets, id: \.self) { preset in
+                                            Text(displayNameForCTPreset(preset)).tag(preset)
+                                        }
+                                    }
+                                    .accessibilityIdentifier("niivue.ctPresetPicker")
+                                    .onChange(of: selectedCTPreset) { _ in
+                                        applySelectedCTPresetNow()
+                                    }
+                                } header: {
+                                    Text("Preset Selection")
+                                }
+
+                                Section {
+                                    Button("Apply Preset Now") {
+                                        applySelectedCTPresetNow()
+                                    }
+                                    .accessibilityIdentifier("niivue.ctPresetApply")
+                                    .disabled(webViewManager.volumes.isEmpty)
+                                } header: {
+                                    Text("Manual Control")
+                                }
+                            }
+                        }
+                        .navigationTitle("CT Presets")
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Done") { ctPresetSheetPresented = false }
+                            }
+                        }
+                        .task(id: webViewManager.isReady) {
+                            await loadCTUrinaryPresetsIfPossible()
+                        }
+                    }
+                }
+
                 // Phase 2 UI: Dedicated Sessions sheet
                 Button(action: {
                     sessionsSheetPresented = true
@@ -1452,13 +2222,118 @@ struct ContentView: View {
                     .onAppear {
                         webViewManager.load()
                     }
+                    .onChange(of: webViewManager.isReady) { isReady in
+                        guard isReady else { return }
+                        syncAutoApplyCTPresetToJS(autoApplyCTPreset)
+                    }
+                    .overlay(
+                        ViewportInteractionHandler(
+                            offset: $twoFingerPanOffset,
+                            scale: $twoFingerViewportScale,
+                            installTarget: is2DWebViewSliceType ? .installerView : .webView,
+                            accessibilityIdentifier: isUITestSimulateTwoFingerPinch ? "niivue.viewportInteractionSurface" : nil,
+                            isEnabled: webViewManager.currentSliceType == 0 || webViewManager.currentSliceType == 1 || webViewManager.currentSliceType == 2,
+                            isOneFingerPanEnabled: is2DWebViewSliceType,
+                            simulateTwoFingerPanWithOneFinger: isUITestSimulateTwoFingerPan,
+                            pinchSensitivityExponent: 0.9,
+                            onInstalled: { viewType in
+                                twoFingerPanInstallCount += 1
+                                twoFingerPanInstalledViewType = viewType
+                            },
+                            onPanBegan: { _ in
+                                twoFingerPanEventCount = 0
+                            },
+                            onPanChanged: { start, end, _ in
+                                twoFingerPanEventCount += 1
+                                let delta = CGSize(width: end.x - start.x, height: end.y - start.y)
+                                webViewManager.enqueue2DPanDelta(
+                                    deltaX: Double(delta.width),
+                                    deltaY: Double(delta.height),
+                                    endX: Double(end.x),
+                                    endY: Double(end.y)
+                                )
+                            },
+                            onPanEnded: {
+                                webViewManager.flushPendingGestureCommandsNow()
+                            },
+                            onPinchBegan: { _ in
+                                twoFingerPinchEventCount = 0
+                            },
+                            onPinchChanged: { location, newScale in
+                                twoFingerPinchEventCount += 1
+                                webViewManager.enqueue2DZoom(
+                                    scale: Double(newScale),
+                                    anchorX: Double(location.x),
+                                    anchorY: Double(location.y)
+                                )
+                            },
+                            onPinchEnded: {
+                                webViewManager.flushPendingGestureCommandsNow()
+                            },
+                            onOneFingerPanBegan: { _ in
+                                switch toolMode {
+                                case .scroll:
+                                    webViewManager.handleStackScrollDragBegan(translationY: 0, velocityY: 0)
+
+                                case .windowLevel:
+                                    guard is2DWebViewSliceType else { return }
+                                    windowLevelIsDragging = true
+                                    windowLevelDragStartWindowWidth = windowWidth
+                                    windowLevelDragStartWindowLevel = windowLevel
+                                    windowLevelEventCount = 0
+                                }
+                            },
+                            onOneFingerPanChanged: { _, translation, velocity in
+                                switch toolMode {
+                                case .scroll:
+                                    webViewManager.handleStackScrollDragChanged(
+                                        translationY: Double(translation.height),
+                                        velocityY: Double(velocity.height)
+                                    )
+
+                                case .windowLevel:
+                                    guard is2DWebViewSliceType else { return }
+                                    guard let startWW = windowLevelDragStartWindowWidth,
+                                          let startWL = windowLevelDragStartWindowLevel else { return }
+
+                                    var newWidth = startWW + (Double(translation.width) * windowLevelPointsPerHU)
+                                    newWidth = max(1.0, newWidth)
+                                    let newLevel = startWL - (Double(translation.height) * windowLevelPointsPerHU)
+
+                                    windowWidth = newWidth
+                                    windowLevel = newLevel
+                                    windowLevelEventCount += 1
+
+                                    webViewManager.enqueueIntensityWindow(
+                                        volumeIndex: 0,
+                                        windowWidth: newWidth,
+                                        windowLevel: newLevel
+                                    )
+                                }
+                            },
+                            onOneFingerPanEnded: {
+                                switch toolMode {
+                                case .scroll:
+                                    webViewManager.handleStackScrollDragEnded()
+
+                                case .windowLevel:
+                                    windowLevelIsDragging = false
+                                    windowLevelDragStartWindowWidth = nil
+                                    windowLevelDragStartWindowLevel = nil
+                                    webViewManager.flushPendingGestureCommandsNow()
+                                }
+                            }
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .allowsHitTesting(is2DWebViewSliceType)
+                    )
                     .background(Color.black)
 
                 loadingOverlay
                 hudOverlay
 
-                // Phase 2 Task 2: Volume count display (shown in UI test mode for verification)
-                if isUITestLoadMultiple {
+                // Phase 2: UI-test instrumentation overlay
+                if isUITestMode {
                     VStack {
                         Spacer()
                         HStack {
@@ -1468,8 +2343,42 @@ struct ContentView: View {
                                     .accessibilityIdentifier("niivue.isReady")
                                 Text("\(webViewManager.volumes.count)")
                                     .accessibilityIdentifier("niivue.volumeCount")
+                                Text("\(webViewManager.currentSliceIndex ?? -1)")
+                                    .accessibilityIdentifier("niivue.sliceIndex")
+                                Text("\(webViewManager.currentCrosshairSliceIndex ?? -1)")
+                                    .accessibilityIdentifier("niivue.crosshairSliceIndex")
+                                Text("\(webViewManager.currentTotalSlices ?? -1)")
+                                    .accessibilityIdentifier("niivue.totalSlices")
+                                Text("\(webViewManager.currentSliceType)")
+                                    .accessibilityIdentifier("niivue.sliceType")
+                                Text("\(webViewManager.stackScrollDebugEventCount)")
+                                    .accessibilityIdentifier("niivue.stackScrollEvents")
+                                Text(String(format: "%.3f", windowWidth))
+                                    .accessibilityIdentifier("niivue.windowWidth")
+                                Text(String(format: "%.3f", windowLevel))
+                                    .accessibilityIdentifier("niivue.windowLevel")
+                                Text("\(windowLevelEventCount)")
+                                    .accessibilityIdentifier("niivue.windowLevelEvents")
+                                Text("\(Int(twoFingerPanOffset.width))")
+                                    .accessibilityIdentifier("niivue.twoFingerPanOffsetX")
+                                Text("\(Int(twoFingerPanOffset.height))")
+                                    .accessibilityIdentifier("niivue.twoFingerPanOffsetY")
+                                Text("\(twoFingerPanEventCount)")
+                                    .accessibilityIdentifier("niivue.twoFingerPanEvents")
+                                Text(String(format: "%.3f", twoFingerViewportScale))
+                                    .accessibilityIdentifier("niivue.viewportScale")
+                                Text("\(twoFingerPinchEventCount)")
+                                    .accessibilityIdentifier("niivue.viewportPinchEvents")
+                                Text("\(twoFingerPanInstallCount)")
+                                    .accessibilityIdentifier("niivue.twoFingerPanInstallCount")
+                                Text(twoFingerPanInstalledViewType)
+                                    .accessibilityIdentifier("niivue.twoFingerPanInstalledView")
+                                Text(dicomImportStatusMessage ?? "")
+                                    .accessibilityIdentifier("niivue.dicomImportStatusGlobal")
                                 Text(webViewManager.lastErrorMessage ?? "")
                                     .accessibilityIdentifier("niivue.lastError")
+                                Text(webViewManager.lastJSLogMessage ?? "")
+                                    .accessibilityIdentifier("niivue.lastJSLog")
                                 Text(webViewManager.lastClipPlaneDepth.map { String(format: "%.3f", $0) } ?? "")
                                     .accessibilityIdentifier("niivue.clipPlaneDepth")
                             }
@@ -1480,6 +2389,7 @@ struct ContentView: View {
                             .padding()
                         }
                     }
+                    .allowsHitTesting(false)
                 }
             }
             .padding()
@@ -1496,6 +2406,72 @@ struct ContentView: View {
                             let sample2 = (url: "niivue://app/samples/ui-test-volume-2.nii", name: "ui-test-volume-2.nii")
                             try await webViewManager.loadVolumesFromUrls([sample1, sample2])
                             print("[ContentView] loadVolumesFromUrls returned, volumes.count = \(webViewManager.volumes.count)")
+                        } else if let relativeDir = uiTestDicomRelativeDirectory {
+                            await MainActor.run {
+                                dicomImportInProgress = true
+                                dicomImportStatusMessage = "Loading DICOM fixture…"
+                            }
+
+                            defer {
+                                Task { @MainActor in
+                                    dicomImportInProgress = false
+                                }
+                            }
+
+                            let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                            let fixtureDir = documentsDir.appendingPathComponent(relativeDir, isDirectory: true)
+
+                            let fileURLs: [URL]
+                            do {
+                                fileURLs = try FileManager.default.contentsOfDirectory(
+                                    at: fixtureDir,
+                                    includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+                                    options: [.skipsHiddenFiles]
+                                )
+                            } catch {
+                                await MainActor.run {
+                                    dicomImportStatusMessage = "Failed to read fixture dir: \(error.localizedDescription)"
+                                }
+                                return
+                            }
+
+                            let dicomFiles = fileURLs
+                                .filter { url in
+                                    let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
+                                    guard values?.isDirectory != true else { return false }
+                                    guard values?.isRegularFile != false else { return false }
+                                    let ext = url.pathExtension.lowercased()
+                                    return ext == "dcm" || ext == "dicom" || ext.isEmpty
+                                }
+                                .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+                            guard !dicomFiles.isEmpty else {
+                                await MainActor.run {
+                                    dicomImportStatusMessage = "Failed: no DICOM files found in fixture dir."
+                                }
+                                return
+                            }
+
+                            await MainActor.run {
+                                dicomImportStatusMessage = "Loading \(dicomFiles.count) DICOM file(s)…"
+                            }
+
+                            let seriesId = await dicomSeriesStore.register(files: dicomFiles)
+                            webViewManager.urlSchemeHandler.dicomSeriesStore = dicomSeriesStore
+
+                            let manifestURL = "niivue://app/dicom/\(seriesId)/niivue-manifest.txt"
+                            do {
+                                try await webViewManager.loadDicomSeriesFromManifestURL(manifestURL)
+                                await MainActor.run {
+                                    dicomImportStatusMessage = "Loaded \(dicomFiles.count) DICOM file(s)."
+                                }
+                            } catch {
+                                await MainActor.run {
+                                    let message = "Failed to load DICOM series: \(error.localizedDescription)"
+                                    dicomImportStatusMessage = message
+                                    webViewManager.lastErrorMessage = message
+                                }
+                            }
                         } else {
                             // Normal path: load single demo image
                             let sampleURL = "niivue://app/samples/T1w_DEMO.nii.gz"
@@ -1503,12 +2479,19 @@ struct ContentView: View {
                             try await webViewManager.loadImageFromUrl(url: sampleURL, fileName: fileName)
 
                             // Update UI state to show filename
-                            await MainActor.run {
-                                pickedDocumentURL = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples")
-                            }
-                        }
-                    } catch {
-                        print("Error loading sample image: \(error)")
+	                            await MainActor.run {
+	                                pickedDocumentURL = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples")
+	                            }
+	                        }
+
+		                        if let updated = try? await webViewManager.getIntensityWindow(volumeIndex: 0) {
+		                            await MainActor.run {
+		                                windowWidth = max(1.0, updated.windowWidth)
+		                                windowLevel = updated.windowLevel
+		                            }
+		                        }
+		                    } catch {
+		                        print("Error loading sample image: \(error)")
 
                         // Fallback to base64 if URL-based fails (limited by maxBase64FallbackBytes)
                         if !isUITestLoadMultiple, let url = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples") {
@@ -1551,9 +2534,23 @@ struct ContentView: View {
         }
         .onChange(of: sliceType) { newValue in
             print("sliceType updated to: \(newValue)")
+            if !(newValue == SliceTypes.Axial.rawValue || newValue == SliceTypes.Coronal.rawValue || newValue == SliceTypes.Sagittal.rawValue) {
+                toolMode = .scroll
+                windowLevelIsDragging = false
+                windowLevelDragStartWindowWidth = nil
+                windowLevelDragStartWindowLevel = nil
+            }
             Task {
                 do {
                     try await webViewManager.setSliceType(sliceType: newValue)
+
+                    // In 2D slice views, the native gesture system owns dragging. Disable Niivue drag mode to
+                    // prevent the underlying web content from competing with native gestures.
+                    if newValue == SliceTypes.Axial.rawValue || newValue == SliceTypes.Coronal.rawValue || newValue == SliceTypes.Sagittal.rawValue {
+                        try await webViewManager.setDragMode(dragMode: DragTypes.None.rawValue)
+                    } else {
+                        try await webViewManager.setDragMode(dragMode: dragType)
+                    }
                 } catch {
                     print("Error setting slice type: \(error)")
                 }
@@ -1584,6 +2581,10 @@ struct ContentView: View {
         }
         .onChange(of: dragType) { newValue in
             print("drag type updated to: \(newValue)")
+            guard !is2DSliceType else {
+                // 2D slice views are driven by native gestures; ignore dragMode changes here.
+                return
+            }
             Task {
                 do {
                     try await webViewManager.setDragMode(dragMode: newValue)

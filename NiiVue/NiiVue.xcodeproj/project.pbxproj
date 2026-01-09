@@ -44,9 +44,11 @@
 		M1N2O3P401234567ABCDEF01 /* SessionSnapshotV1.swift in Sources */ = {isa = PBXBuildFile; fileRef = M1N2O3P401234567ABCDEF02 /* SessionSnapshotV1.swift */; };
 		N1O2P3Q401234567ABCDEF01 /* Base64FileEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = N1O2P3Q401234567ABCDEF02 /* Base64FileEncoderTests.swift */; };
 		O1P2Q3R401234567ABCDEF01 /* DicomSeriesStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = O1P2Q3R401234567ABCDEF02 /* DicomSeriesStoreTests.swift */; };
-		P1Q2R3S401234567ABCDEF01 /* DicomSeriesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */; };
-		Q1R2S3T401234567ABCDEF01 /* DicomCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = Q1R2S3T401234567ABCDEF02 /* DicomCommandTests.swift */; };
-/* End PBXBuildFile section */
+			P1Q2R3S401234567ABCDEF01 /* DicomSeriesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */; };
+			Q1R2S3T401234567ABCDEF01 /* DicomCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = Q1R2S3T401234567ABCDEF02 /* DicomCommandTests.swift */; };
+			05FA761B8C45710BE98CADFB /* CTPresetServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76E2A5095D83C725AF9B05BB /* CTPresetServiceTests.swift */; };
+			44E00797F804C49BC5C3E7AE /* CTPresetService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C2C8CD003E4BE0DA0797E0E /* CTPresetService.swift */; };
+	/* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		34CD18032B45C5420015EF4C /* PBXContainerItemProxy */ = {
@@ -124,8 +126,10 @@
 		N1O2P3Q401234567ABCDEF02 /* Base64FileEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Base64FileEncoderTests.swift; sourceTree = "<group>"; };
 		O1P2Q3R401234567ABCDEF02 /* DicomSeriesStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomSeriesStoreTests.swift; sourceTree = "<group>"; };
 		P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomSeriesStore.swift; sourceTree = "<group>"; };
-		Q1R2S3T401234567ABCDEF02 /* DicomCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomCommandTests.swift; sourceTree = "<group>"; };
-/* End PBXFileReference section */
+			Q1R2S3T401234567ABCDEF02 /* DicomCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomCommandTests.swift; sourceTree = "<group>"; };
+			76E2A5095D83C725AF9B05BB /* CTPresetServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CTPresetServiceTests.swift; sourceTree = "<group>"; };
+			3C2C8CD003E4BE0DA0797E0E /* CTPresetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CTPresetService.swift; sourceTree = "<group>"; };
+	/* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		34CD17EF2B45C5400015EF4C /* Frameworks */ = {
@@ -198,19 +202,20 @@
 			path = "Preview Content";
 			sourceTree = "<group>";
 		};
-		34CD18052B45C5420015EF4C /* NiiVueTests */ = {
-			isa = PBXGroup;
-			children = (
-				N1O2P3Q401234567ABCDEF02 /* Base64FileEncoderTests.swift */,
-				34CD18062B45C5420015EF4C /* NiiVueTests.swift */,
-				A1B2C3D401234567ABCDEF0A /* JavaScriptQuoteTests.swift */,
-				A1B2C3D401234567ABCDEF0C /* MockJavaScriptEvaluator.swift */,
-				A1B2C3D401234567ABCDEF0E /* JavaScriptEvaluatingTests.swift */,
-				A1B2C3D401234567ABCDEF10 /* WebViewManagerCommandTests.swift */,
-				B1C2D3E401234567ABCDEF04 /* DrawingExportServiceTests.swift */,
-				B1C2D3E401234567ABCDEF06 /* WebViewManagerStateTests.swift */,
-				C1D2E3F401234567ABCDEF04 /* FileImportServiceTests.swift */,
-				D1E2F3A401234567ABCDEF06 /* NiivueURLRouterTests.swift */,
+			34CD18052B45C5420015EF4C /* NiiVueTests */ = {
+				isa = PBXGroup;
+				children = (
+					N1O2P3Q401234567ABCDEF02 /* Base64FileEncoderTests.swift */,
+					34CD18062B45C5420015EF4C /* NiiVueTests.swift */,
+					A1B2C3D401234567ABCDEF0A /* JavaScriptQuoteTests.swift */,
+					A1B2C3D401234567ABCDEF0C /* MockJavaScriptEvaluator.swift */,
+					A1B2C3D401234567ABCDEF0E /* JavaScriptEvaluatingTests.swift */,
+					A1B2C3D401234567ABCDEF10 /* WebViewManagerCommandTests.swift */,
+					76E2A5095D83C725AF9B05BB /* CTPresetServiceTests.swift */,
+					B1C2D3E401234567ABCDEF04 /* DrawingExportServiceTests.swift */,
+					B1C2D3E401234567ABCDEF06 /* WebViewManagerStateTests.swift */,
+					C1D2E3F401234567ABCDEF04 /* FileImportServiceTests.swift */,
+					D1E2F3A401234567ABCDEF06 /* NiivueURLRouterTests.swift */,
 				F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */,
 				G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */,
 				H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */,
@@ -245,15 +250,16 @@
 			path = Web;
 			sourceTree = "<group>";
 		};
-		B1C2D3E401234567ABCDEF07 /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				L1M2N3O401234567ABCDEF02 /* Base64FileEncoder.swift */,
-				B1C2D3E401234567ABCDEF02 /* DrawingExportService.swift */,
-				C1D2E3F401234567ABCDEF02 /* FileImportService.swift */,
-				E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */,
-				M1N2O3P401234567ABCDEF02 /* SessionSnapshotV1.swift */,
-				K1L2M3N401234567ABCDEF02 /* SessionStore.swift */,
+			B1C2D3E401234567ABCDEF07 /* Services */ = {
+				isa = PBXGroup;
+				children = (
+					L1M2N3O401234567ABCDEF02 /* Base64FileEncoder.swift */,
+					3C2C8CD003E4BE0DA0797E0E /* CTPresetService.swift */,
+					B1C2D3E401234567ABCDEF02 /* DrawingExportService.swift */,
+					C1D2E3F401234567ABCDEF02 /* FileImportService.swift */,
+					E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */,
+					M1N2O3P401234567ABCDEF02 /* SessionSnapshotV1.swift */,
+					K1L2M3N401234567ABCDEF02 /* SessionStore.swift */,
 				P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */,
 			);
 			path = Services;
@@ -407,44 +413,46 @@
 	/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		34CD17EE2B45C5400015EF4C /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				3487D34F2BCFD932007C6D7C /* SharedData.swift in Sources */,
-				34CD17F62B45C5400015EF4C /* NiiVueApp.swift in Sources */,
-				3487D3492BC85E5B007C6D7C /* ContentView.swift in Sources */,
-				A1B2C3D401234567ABCDEF01 /* JavaScriptQuote.swift in Sources */,
-				A1B2C3D401234567ABCDEF03 /* JavaScriptEvaluating.swift in Sources */,
-				A1B2C3D401234567ABCDEF05 /* WKWebView+JavaScriptEvaluating.swift in Sources */,
-				A1B2C3D401234567ABCDEF07 /* WebViewManager.swift in Sources */,
-				L1M2N3O401234567ABCDEF01 /* Base64FileEncoder.swift in Sources */,
-				B1C2D3E401234567ABCDEF01 /* DrawingExportService.swift in Sources */,
-				C1D2E3F401234567ABCDEF01 /* FileImportService.swift in Sources */,
-				D1E2F3A401234567ABCDEF01 /* NiivueURLRouter.swift in Sources */,
-				D1E2F3A401234567ABCDEF03 /* NiivueURLSchemeHandler.swift in Sources */,
-				E1F2A3B401234567ABCDEF01 /* ImportedFileStore.swift in Sources */,
+			34CD17EE2B45C5400015EF4C /* Sources */ = {
+				isa = PBXSourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					3487D34F2BCFD932007C6D7C /* SharedData.swift in Sources */,
+					34CD17F62B45C5400015EF4C /* NiiVueApp.swift in Sources */,
+					3487D3492BC85E5B007C6D7C /* ContentView.swift in Sources */,
+					A1B2C3D401234567ABCDEF01 /* JavaScriptQuote.swift in Sources */,
+					A1B2C3D401234567ABCDEF03 /* JavaScriptEvaluating.swift in Sources */,
+					A1B2C3D401234567ABCDEF05 /* WKWebView+JavaScriptEvaluating.swift in Sources */,
+					A1B2C3D401234567ABCDEF07 /* WebViewManager.swift in Sources */,
+					L1M2N3O401234567ABCDEF01 /* Base64FileEncoder.swift in Sources */,
+					44E00797F804C49BC5C3E7AE /* CTPresetService.swift in Sources */,
+					B1C2D3E401234567ABCDEF01 /* DrawingExportService.swift in Sources */,
+					C1D2E3F401234567ABCDEF01 /* FileImportService.swift in Sources */,
+					D1E2F3A401234567ABCDEF01 /* NiivueURLRouter.swift in Sources */,
+					D1E2F3A401234567ABCDEF03 /* NiivueURLSchemeHandler.swift in Sources */,
+					E1F2A3B401234567ABCDEF01 /* ImportedFileStore.swift in Sources */,
 				M1N2O3P401234567ABCDEF01 /* SessionSnapshotV1.swift in Sources */,
 				K1L2M3N401234567ABCDEF01 /* SessionStore.swift in Sources */,
 				P1Q2R3S401234567ABCDEF01 /* DicomSeriesStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		34CD17FE2B45C5420015EF4C /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				N1O2P3Q401234567ABCDEF01 /* Base64FileEncoderTests.swift in Sources */,
-				34CD18072B45C5420015EF4C /* NiiVueTests.swift in Sources */,
-				A1B2C3D401234567ABCDEF09 /* JavaScriptQuoteTests.swift in Sources */,
-				A1B2C3D401234567ABCDEF0B /* MockJavaScriptEvaluator.swift in Sources */,
-				A1B2C3D401234567ABCDEF0D /* JavaScriptEvaluatingTests.swift in Sources */,
-				A1B2C3D401234567ABCDEF0F /* WebViewManagerCommandTests.swift in Sources */,
-				B1C2D3E401234567ABCDEF03 /* DrawingExportServiceTests.swift in Sources */,
-				B1C2D3E401234567ABCDEF05 /* WebViewManagerStateTests.swift in Sources */,
-				C1D2E3F401234567ABCDEF03 /* FileImportServiceTests.swift in Sources */,
-				D1E2F3A401234567ABCDEF05 /* NiivueURLRouterTests.swift in Sources */,
-				F1A2B3C401234567ABCDEF01 /* HUDMessageParsingTests.swift in Sources */,
+			34CD17FE2B45C5420015EF4C /* Sources */ = {
+				isa = PBXSourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					N1O2P3Q401234567ABCDEF01 /* Base64FileEncoderTests.swift in Sources */,
+					34CD18072B45C5420015EF4C /* NiiVueTests.swift in Sources */,
+					A1B2C3D401234567ABCDEF09 /* JavaScriptQuoteTests.swift in Sources */,
+					A1B2C3D401234567ABCDEF0B /* MockJavaScriptEvaluator.swift in Sources */,
+					A1B2C3D401234567ABCDEF0D /* JavaScriptEvaluatingTests.swift in Sources */,
+					A1B2C3D401234567ABCDEF0F /* WebViewManagerCommandTests.swift in Sources */,
+					05FA761B8C45710BE98CADFB /* CTPresetServiceTests.swift in Sources */,
+					B1C2D3E401234567ABCDEF03 /* DrawingExportServiceTests.swift in Sources */,
+					B1C2D3E401234567ABCDEF05 /* WebViewManagerStateTests.swift in Sources */,
+					C1D2E3F401234567ABCDEF03 /* FileImportServiceTests.swift in Sources */,
+					D1E2F3A401234567ABCDEF05 /* NiivueURLRouterTests.swift in Sources */,
+					F1A2B3C401234567ABCDEF01 /* HUDMessageParsingTests.swift in Sources */,
 				G1H2I3J401234567ABCDEF01 /* OverlayCommandTests.swift in Sources */,
 				H1I2J3K401234567ABCDEF01 /* TimeSeriesCommandTests.swift in Sources */,
 				I1J2K3L401234567ABCDEF01 /* SegmentationCommandTests.swift in Sources */,

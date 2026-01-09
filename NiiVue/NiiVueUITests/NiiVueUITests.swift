@@ -138,6 +138,17 @@ final class NiiVueUITests: XCTestCase {
         XCTAssertTrue(app.buttons["niivue.sessions"].exists)
     }
 
+    /// CT Adaptive Engine UI: Verify CT Presets sheet entry point exists and opens.
+    func testCTPresetsSheetOpens() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.buttons["niivue.ctPresets"].waitForExistence(timeout: 5))
+        app.buttons["niivue.ctPresets"].tap()
+        XCTAssertTrue(app.otherElements["niivue.ctPresetSheet"].waitForExistence(timeout: 2))
+        app.buttons["Done"].tap()
+    }
+
     func testVolumesSheetOpens() throws {
         let app = XCUIApplication()
         app.launch()
@@ -197,6 +208,37 @@ final class NiiVueUITests: XCTestCase {
         XCTAssertTrue(app.sliders["niivue.segmentation.drawOpacity"].exists)
         XCTAssertTrue(app.buttons["niivue.segmentation.drawColormap"].exists)
         XCTAssertTrue(app.switches["niivue.segmentation.clickToSegment"].exists)
+
+        app.buttons["Done"].tap()
+    }
+
+    func testCTPresetAnalysisAppearsAfterApplyingAdaptivePreset() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-load-multiple"]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        let countLabel = app.staticTexts["niivue.volumeCount"]
+
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 15))
+        XCTAssertTrue(countLabel.waitForExistence(timeout: 15))
+
+        let readyDeadline = Date().addingTimeInterval(20)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready", countLabel.label != "0" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+        XCTAssertNotEqual(countLabel.label, "0")
+
+        app.buttons["niivue.ctPresets"].tap()
+        XCTAssertTrue(app.otherElements["niivue.ctPresetSheet"].waitForExistence(timeout: 2))
+
+        let apply = app.buttons["niivue.ctPresetApply"]
+        XCTAssertTrue(apply.waitForExistence(timeout: 5))
+        apply.tap()
+
+        XCTAssertTrue(app.staticTexts["niivue.ctPresetAnalysis.phase"].waitForExistence(timeout: 5))
 
         app.buttons["Done"].tap()
     }
@@ -389,5 +431,701 @@ final class NiiVueUITests: XCTestCase {
         XCTAssertFalse(clipDepthLabel.label.isEmpty, "Expected clip plane depth to be reported for UI tests.")
         let depth = Double(clipDepthLabel.label) ?? 999
         XCTAssertLessThan(depth, 1.8, "Expected clip plane depth < 1.8 (enabled), got '\(clipDepthLabel.label)'.")
+    }
+
+    /// 2D UX: 1-finger vertical drag should scrub through slices (stack scroll).
+    func test2DStackScrollScrubsSlices() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-load-multiple"]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        let countLabel = app.staticTexts["niivue.volumeCount"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 15))
+        XCTAssertTrue(countLabel.waitForExistence(timeout: 15))
+
+        let readyDeadline = Date().addingTimeInterval(30)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready", countLabel.label == "2" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+        XCTAssertEqual(countLabel.label, "2")
+
+        // Switch to Axial view (2D) so stack scroll applies.
+        app.buttons["niivue.settings"].tap()
+        let viewTypeMenu = app.buttons["niivue.settings.viewType"]
+        XCTAssertTrue(viewTypeMenu.waitForExistence(timeout: 5))
+        viewTypeMenu.tap()
+
+        let axialOption = app.buttons["Axial"]
+        XCTAssertTrue(axialOption.waitForExistence(timeout: 5))
+        axialOption.tap()
+        app.buttons["Dismiss"].tap()
+
+        let sliceIndexLabel = app.staticTexts["niivue.sliceIndex"]
+        XCTAssertTrue(sliceIndexLabel.waitForExistence(timeout: 5), "Expected UI-test slice index label to exist.")
+
+        let totalSlicesLabel = app.staticTexts["niivue.totalSlices"]
+        let sliceTypeLabel = app.staticTexts["niivue.sliceType"]
+        let stackScrollEventsLabel = app.staticTexts["niivue.stackScrollEvents"]
+        let panXLabel = app.staticTexts["niivue.twoFingerPanOffsetX"]
+        let panYLabel = app.staticTexts["niivue.twoFingerPanOffsetY"]
+        let panEventsLabel = app.staticTexts["niivue.twoFingerPanEvents"]
+        XCTAssertTrue(totalSlicesLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(sliceTypeLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(stackScrollEventsLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(panXLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(panYLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(panEventsLabel.waitForExistence(timeout: 5))
+
+        let stateDeadline = Date().addingTimeInterval(10)
+        while Date() < stateDeadline {
+            let sliceType = Int(sliceTypeLabel.label) ?? -1
+            let totalSlices = Int(totalSlicesLabel.label) ?? -1
+            let sliceIndex = Int(sliceIndexLabel.label) ?? -1
+            if sliceType == 0, totalSlices > 0, sliceIndex >= 0 { break }
+            print("[UI] Waiting slice state: sliceType=\(sliceTypeLabel.label) totalSlices=\(totalSlicesLabel.label) sliceIndex=\(sliceIndexLabel.label)")
+            sleep(1)
+        }
+
+        let totalSlices = Int(totalSlicesLabel.label) ?? -1
+        XCTAssertGreaterThan(totalSlices, 1, "Expected totalSlices > 1 for stack scroll test, got '\(totalSlicesLabel.label)'.")
+
+        let initialIndex = Int(sliceIndexLabel.label) ?? -1
+        let initialPanX = panXLabel.label
+        let initialPanY = panYLabel.label
+        let initialPanEvents = panEventsLabel.label
+        print("[UI] Initial slice state: sliceType=\(sliceTypeLabel.label) totalSlices=\(totalSlicesLabel.label) sliceIndex=\(sliceIndexLabel.label) stackScrollEvents=\(stackScrollEventsLabel.label) panX=\(initialPanX) panY=\(initialPanY) panEvents=\(initialPanEvents)")
+
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(webView.waitForExistence(timeout: 10))
+
+        if initialIndex >= (totalSlices - 1) {
+            // If we're already at the last slice, drag down to move backwards.
+            let start = webView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+            let end = webView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        } else {
+            // Drag up by a meaningful distance so we advance several slices.
+            let start = webView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            let end = webView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            let newIndex = Int(sliceIndexLabel.label) ?? -1
+            if initialIndex >= (totalSlices - 1) {
+                if newIndex < initialIndex { break }
+            } else {
+                if newIndex > initialIndex { break }
+            }
+            sleep(1)
+        }
+
+        let finalIndex = Int(sliceIndexLabel.label) ?? -1
+        print("[UI] Final slice state: sliceType=\(sliceTypeLabel.label) totalSlices=\(totalSlicesLabel.label) sliceIndex=\(sliceIndexLabel.label) stackScrollEvents=\(stackScrollEventsLabel.label) panX=\(panXLabel.label) panY=\(panYLabel.label) panEvents=\(panEventsLabel.label)")
+        XCTAssertGreaterThan(Int(stackScrollEventsLabel.label) ?? 0, 0, "Expected native stack scroll gesture handler to receive pan updates.")
+        XCTAssertEqual(panEventsLabel.label, initialPanEvents, "Expected 1-finger stack scroll not to trigger two-finger pan events.")
+        XCTAssertEqual(panXLabel.label, initialPanX, "Expected 1-finger stack scroll not to change two-finger pan X offset.")
+        XCTAssertEqual(panYLabel.label, initialPanY, "Expected 1-finger stack scroll not to change two-finger pan Y offset.")
+        if initialIndex >= (totalSlices - 1) {
+            XCTAssertLessThan(finalIndex, initialIndex, "Expected stack scroll to decrease slice index when starting at last slice. initial=\(initialIndex) final=\(finalIndex)")
+        } else {
+            XCTAssertGreaterThan(finalIndex, initialIndex, "Expected stack scroll to increase slice index. initial=\(initialIndex) final=\(finalIndex)")
+        }
+    }
+
+    /// 2D UX: Two-finger pan should translate the image without being triggered by one-finger drags.
+    func test2DTwoFingerPanUpdatesOffset() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-load-multiple", "--ui-test-simulate-two-finger-pan"]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        let countLabel = app.staticTexts["niivue.volumeCount"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 15))
+        XCTAssertTrue(countLabel.waitForExistence(timeout: 15))
+
+        let readyDeadline = Date().addingTimeInterval(30)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready", countLabel.label == "2" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+        XCTAssertEqual(countLabel.label, "2")
+
+        // Switch to Axial view (2D) so the two-finger pan overlay is enabled.
+        app.buttons["niivue.settings"].tap()
+        let viewTypeMenu = app.buttons["niivue.settings.viewType"]
+        XCTAssertTrue(viewTypeMenu.waitForExistence(timeout: 5))
+        viewTypeMenu.tap()
+
+        let axialOption = app.buttons["Axial"]
+        XCTAssertTrue(axialOption.waitForExistence(timeout: 5))
+        axialOption.tap()
+        app.buttons["Dismiss"].tap()
+
+        let sliceTypeLabel = app.staticTexts["niivue.sliceType"]
+        let sliceIndexLabel = app.staticTexts["niivue.sliceIndex"]
+        let stackScrollEventsLabel = app.staticTexts["niivue.stackScrollEvents"]
+        let panXLabel = app.staticTexts["niivue.twoFingerPanOffsetX"]
+        let panYLabel = app.staticTexts["niivue.twoFingerPanOffsetY"]
+        let panEventsLabel = app.staticTexts["niivue.twoFingerPanEvents"]
+        let panInstallCountLabel = app.staticTexts["niivue.twoFingerPanInstallCount"]
+        let panInstalledViewLabel = app.staticTexts["niivue.twoFingerPanInstalledView"]
+        let viewportScaleLabel = app.staticTexts["niivue.viewportScale"]
+        let viewportPinchEventsLabel = app.staticTexts["niivue.viewportPinchEvents"]
+        XCTAssertTrue(sliceTypeLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(sliceIndexLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(stackScrollEventsLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(panXLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(panYLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(panEventsLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(panInstallCountLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(panInstalledViewLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(viewportScaleLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(viewportPinchEventsLabel.waitForExistence(timeout: 5))
+
+        let stateDeadline = Date().addingTimeInterval(10)
+        while Date() < stateDeadline {
+            let sliceType = Int(sliceTypeLabel.label) ?? -1
+            if sliceType == 0 { break }
+            sleep(1)
+        }
+        XCTAssertEqual(sliceTypeLabel.label, "0", "Expected Axial sliceType=0 for two-finger pan test.")
+
+        let initialPanX = panXLabel.label
+        let initialPanY = panYLabel.label
+        let initialEvents = Int(panEventsLabel.label) ?? 0
+        let initialSliceIndex = sliceIndexLabel.label
+        let initialStackScrollEvents = stackScrollEventsLabel.label
+        print("[UI] Initial pan state: panX=\(initialPanX) panY=\(initialPanY) panEvents=\(panEventsLabel.label) panInstallCount=\(panInstallCountLabel.label) panInstalledView=\(panInstalledViewLabel.label) viewportScale=\(viewportScaleLabel.label) viewportPinchEvents=\(viewportPinchEventsLabel.label) sliceIndex=\(initialSliceIndex) stackScrollEvents=\(initialStackScrollEvents)")
+
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(webView.waitForExistence(timeout: 10))
+
+        // UI tests cannot synthesize a true two-finger drag on iPhone hardware.
+        // The app enables a UI-test-only fallback (`--ui-test-simulate-two-finger-pan`) that routes a 1-finger drag into the same pan path.
+        let start = webView.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+        let end = webView.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            let currentEvents = Int(panEventsLabel.label) ?? 0
+            if currentEvents > initialEvents, panXLabel.label != initialPanX || panYLabel.label != initialPanY {
+                break
+            }
+            sleep(1)
+        }
+
+        print("[UI] Final pan state: panX=\(panXLabel.label) panY=\(panYLabel.label) panEvents=\(panEventsLabel.label)")
+        XCTAssertGreaterThan(Int(panEventsLabel.label) ?? 0, initialEvents, "Expected two-finger pan handler to receive updates.")
+        XCTAssertTrue(panXLabel.label != initialPanX || panYLabel.label != initialPanY, "Expected two-finger pan offsets to change.")
+        XCTAssertEqual(stackScrollEventsLabel.label, initialStackScrollEvents, "Expected pan gesture not to trigger stack scroll.")
+        XCTAssertEqual(sliceIndexLabel.label, initialSliceIndex, "Expected pan gesture not to change slice index.")
+    }
+
+    /// 2D UX: Two-finger pinch should zoom the viewport without changing slice index.
+    func test2DViewportPinchZoomUpdatesScale() throws {
+        let app = XCUIApplication()
+        // XCUI pinch events do not reliably reach UIKit recognizers installed on WKWebView.
+        // Enable a UI-test-only interaction surface that receives the pinch recognizer.
+        app.launchArguments = ["--ui-test-load-multiple", "--ui-test-simulate-two-finger-pinch"]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        let countLabel = app.staticTexts["niivue.volumeCount"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 15))
+        XCTAssertTrue(countLabel.waitForExistence(timeout: 15))
+
+        let readyDeadline = Date().addingTimeInterval(30)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready", countLabel.label == "2" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+        XCTAssertEqual(countLabel.label, "2")
+
+        // Switch to Axial view (2D) so the viewport interaction handler is enabled.
+        app.buttons["niivue.settings"].tap()
+        let viewTypeMenu = app.buttons["niivue.settings.viewType"]
+        XCTAssertTrue(viewTypeMenu.waitForExistence(timeout: 5))
+        viewTypeMenu.tap()
+
+        let axialOption = app.buttons["Axial"]
+        XCTAssertTrue(axialOption.waitForExistence(timeout: 5))
+        axialOption.tap()
+        app.buttons["Dismiss"].tap()
+
+        let sliceTypeLabel = app.staticTexts["niivue.sliceType"]
+        let sliceIndexLabel = app.staticTexts["niivue.sliceIndex"]
+        let stackScrollEventsLabel = app.staticTexts["niivue.stackScrollEvents"]
+        let viewportScaleLabel = app.staticTexts["niivue.viewportScale"]
+        let viewportPinchEventsLabel = app.staticTexts["niivue.viewportPinchEvents"]
+        XCTAssertTrue(sliceTypeLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(sliceIndexLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(stackScrollEventsLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(viewportScaleLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(viewportPinchEventsLabel.waitForExistence(timeout: 5))
+
+        let stateDeadline = Date().addingTimeInterval(10)
+        while Date() < stateDeadline {
+            let sliceType = Int(sliceTypeLabel.label) ?? -1
+            if sliceType == 0 { break }
+            sleep(1)
+        }
+        XCTAssertEqual(sliceTypeLabel.label, "0", "Expected Axial sliceType=0 for pinch zoom test.")
+
+        let initialScale = viewportScaleLabel.label
+        let initialPinchEvents = Int(viewportPinchEventsLabel.label) ?? 0
+        let initialSliceIndex = sliceIndexLabel.label
+        let initialStackScrollEvents = stackScrollEventsLabel.label
+        print("[UI] Initial zoom state: viewportScale=\(initialScale) viewportPinchEvents=\(viewportPinchEventsLabel.label) sliceIndex=\(initialSliceIndex) stackScrollEvents=\(initialStackScrollEvents)")
+
+        let interactionSurface = app.otherElements["niivue.viewportInteractionSurface"]
+        XCTAssertTrue(interactionSurface.waitForExistence(timeout: 10))
+
+        interactionSurface.pinch(withScale: 1.6, velocity: 1)
+
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            let pinchEvents = Int(viewportPinchEventsLabel.label) ?? 0
+            if pinchEvents > initialPinchEvents, viewportScaleLabel.label != initialScale {
+                break
+            }
+            sleep(1)
+        }
+
+        print("[UI] Final zoom state: viewportScale=\(viewportScaleLabel.label) viewportPinchEvents=\(viewportPinchEventsLabel.label)")
+        XCTAssertGreaterThan(Int(viewportPinchEventsLabel.label) ?? 0, initialPinchEvents, "Expected pinch recognizer to receive updates.")
+        XCTAssertNotEqual(viewportScaleLabel.label, initialScale, "Expected viewport scale to change after pinch.")
+        XCTAssertEqual(sliceIndexLabel.label, initialSliceIndex, "Expected pinch zoom not to change slice index.")
+        XCTAssertEqual(stackScrollEventsLabel.label, initialStackScrollEvents, "Expected pinch zoom not to trigger stack scroll.")
+    }
+
+    /// 2D UX: Window/Level mode should adjust WW/WL with 1 finger (and not scroll slices).
+    func test2DWindowLevelAdjustsContrastWithoutScrolling() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-load-multiple"]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        let countLabel = app.staticTexts["niivue.volumeCount"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 15))
+        XCTAssertTrue(countLabel.waitForExistence(timeout: 15))
+
+        let readyDeadline = Date().addingTimeInterval(30)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready", countLabel.label == "2" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+        XCTAssertEqual(countLabel.label, "2")
+
+        // Switch to Axial view (2D)
+        app.buttons["niivue.settings"].tap()
+        let viewTypeMenu = app.buttons["niivue.settings.viewType"]
+        XCTAssertTrue(viewTypeMenu.waitForExistence(timeout: 5))
+        viewTypeMenu.tap()
+
+        let axialOption = app.buttons["Axial"]
+        XCTAssertTrue(axialOption.waitForExistence(timeout: 5))
+        axialOption.tap()
+        app.buttons["Dismiss"].tap()
+
+        let sliceTypeLabel = app.staticTexts["niivue.sliceType"]
+        let sliceIndexLabel = app.staticTexts["niivue.sliceIndex"]
+        let stackScrollEventsLabel = app.staticTexts["niivue.stackScrollEvents"]
+        let windowWidthLabel = app.staticTexts["niivue.windowWidth"]
+        let windowLevelLabel = app.staticTexts["niivue.windowLevel"]
+        let windowLevelEventsLabel = app.staticTexts["niivue.windowLevelEvents"]
+
+        XCTAssertTrue(sliceTypeLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(sliceIndexLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(stackScrollEventsLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(windowWidthLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(windowLevelLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(windowLevelEventsLabel.waitForExistence(timeout: 5))
+
+        let stateDeadline = Date().addingTimeInterval(10)
+        while Date() < stateDeadline {
+            let sliceType = Int(sliceTypeLabel.label) ?? -1
+            if sliceType == 0 { break }
+            sleep(1)
+        }
+        XCTAssertEqual(sliceTypeLabel.label, "0", "Expected Axial sliceType=0 for window/level test.")
+
+        let windowLevelToolButton = app.buttons["niivue.tool.windowLevel"]
+        XCTAssertTrue(windowLevelToolButton.waitForExistence(timeout: 5))
+        windowLevelToolButton.tap()
+
+        // Window width should never be zero; clamp to >= 1.0 to avoid unstable WW/WL math.
+        let wwSyncDeadline = Date().addingTimeInterval(5)
+        var syncedWW = Double(windowWidthLabel.label) ?? 0
+        while Date() < wwSyncDeadline {
+            syncedWW = Double(windowWidthLabel.label) ?? 0
+            if syncedWW >= 1.0 { break }
+            usleep(200_000)
+        }
+        XCTAssertGreaterThanOrEqual(syncedWW, 1.0, "Expected windowWidth to be clamped to >= 1.0, got '\(windowWidthLabel.label)'.")
+
+        let initialWW = syncedWW
+        let initialWL = Double(windowLevelLabel.label) ?? 0
+        let initialWindowLevelEvents = Int(windowLevelEventsLabel.label) ?? 0
+        let initialSliceIndex = sliceIndexLabel.label
+        let initialStackScrollEvents = stackScrollEventsLabel.label
+        print("[UI] Initial window/level: WW=\(windowWidthLabel.label) WL=\(windowLevelLabel.label) wlEvents=\(windowLevelEventsLabel.label) sliceIndex=\(initialSliceIndex) stackScrollEvents=\(initialStackScrollEvents)")
+
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(webView.waitForExistence(timeout: 10))
+
+        let startVector = CGVector(dx: 0.5, dy: 0.5)
+        let endVector = CGVector(dx: 0.7, dy: 0.3)
+        let start = webView.coordinate(withNormalizedOffset: startVector)
+        let end = webView.coordinate(withNormalizedOffset: endVector)
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            let currentEvents = Int(windowLevelEventsLabel.label) ?? 0
+            let ww = Double(windowWidthLabel.label) ?? initialWW
+            let wl = Double(windowLevelLabel.label) ?? initialWL
+            if currentEvents > initialWindowLevelEvents, (ww != initialWW || wl != initialWL) {
+                break
+            }
+            sleep(1)
+        }
+
+        print("[UI] Final window/level: WW=\(windowWidthLabel.label) WL=\(windowLevelLabel.label) wlEvents=\(windowLevelEventsLabel.label)")
+
+        let finalWW = Double(windowWidthLabel.label) ?? initialWW
+        let finalWL = Double(windowLevelLabel.label) ?? initialWL
+        XCTAssertGreaterThan(Int(windowLevelEventsLabel.label) ?? 0, initialWindowLevelEvents, "Expected window/level handler to receive drag updates.")
+
+        // Verify stable-origin math (prevents mid-drag re-captures that cause jumps).
+        let pointsPerHU = 2.0
+        let translationX = (endVector.dx - startVector.dx) * webView.frame.size.width
+        let translationY = (endVector.dy - startVector.dy) * webView.frame.size.height
+        let expectedWW = max(1.0, initialWW + (Double(translationX) * pointsPerHU))
+        let expectedWL = initialWL - (Double(translationY) * pointsPerHU)
+        XCTAssertEqual(finalWW, expectedWW, accuracy: 25, "Expected WW to match translation-based calculation.")
+        XCTAssertEqual(finalWL, expectedWL, accuracy: 25, "Expected WL to match translation-based calculation.")
+
+        XCTAssertEqual(sliceIndexLabel.label, initialSliceIndex, "Expected window/level gesture not to change slice index.")
+        XCTAssertEqual(stackScrollEventsLabel.label, initialStackScrollEvents, "Expected window/level gesture not to trigger stack scroll.")
+    }
+
+    /// Phase 2 Task 9: DICOM - Load a real-world KiTS23 CT series from a device fixture directory.
+    func testDicomImportKiTS23SeriesLoadsVolume() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--ui-test-dicom-dir",
+            "dicom-fixtures/VOLUME_MED_E_ABD_3"
+        ]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 30), "Expected ready label to exist in UI test mode.")
+
+        let statusLabel = app.staticTexts["niivue.dicomImportStatusGlobal"]
+        XCTAssertTrue(statusLabel.waitForExistence(timeout: 30), "Expected global DICOM status label to exist.")
+
+        let errorLabel = app.staticTexts["niivue.lastError"]
+        XCTAssertTrue(errorLabel.waitForExistence(timeout: 30), "Expected last error label to exist.")
+
+        let jsLogLabel = app.staticTexts["niivue.lastJSLog"]
+        XCTAssertTrue(jsLogLabel.waitForExistence(timeout: 30), "Expected JS log label to exist.")
+
+        // Wait for the app to be ready for commands.
+        let readyDeadline = Date().addingTimeInterval(60)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+
+        // Wait for the DICOM load to either succeed or surface a failure message.
+        let volumeCountLabel = app.staticTexts["niivue.volumeCount"]
+        XCTAssertTrue(volumeCountLabel.waitForExistence(timeout: 30), "Expected volume count label to exist.")
+
+        let deadline = Date().addingTimeInterval(180)
+        while Date() < deadline {
+            let status = statusLabel.label
+            let volumeCount = Int(volumeCountLabel.label) ?? 0
+            if status.contains("Loaded") && volumeCount > 0 { break }
+            if status.contains("Failed") { break }
+            sleep(2)
+        }
+
+        let finalStatus = statusLabel.label
+        let finalError = errorLabel.label
+        let finalJSLog = jsLogLabel.label
+        let finalVolumeCount = Int(volumeCountLabel.label) ?? 0
+        print("[UI] DICOM final: status=\(finalStatus) error=\(finalError) jsLog=\(finalJSLog) volumeCount=\(finalVolumeCount)")
+
+        XCTAssertTrue(finalStatus.contains("Loaded"), "Expected DICOM series to load. status='\(finalStatus)' error='\(finalError)' jsLog='\(finalJSLog)'")
+        XCTAssertGreaterThan(finalVolumeCount, 0, "Expected at least 1 loaded volume after DICOM import.")
+        XCTAssertTrue(finalJSLog.contains("[DICOM]"), "Expected JS DICOM loader logs to be forwarded to native layer. jsLog='\(finalJSLog)'")
+    }
+
+    /// Phase 2 Task 9: DICOM - Missing fixture directory should fail fast and never crash.
+    func testDicomImportMissingFixtureDirectoryShowsFailure() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--ui-test-dicom-dir",
+            "dicom-fixtures/DOES_NOT_EXIST"
+        ]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 30))
+
+        let statusLabel = app.staticTexts["niivue.dicomImportStatusGlobal"]
+        XCTAssertTrue(statusLabel.waitForExistence(timeout: 30))
+
+        let volumeCountLabel = app.staticTexts["niivue.volumeCount"]
+        XCTAssertTrue(volumeCountLabel.waitForExistence(timeout: 30))
+
+        // Wait for the app to be ready for commands.
+        let readyDeadline = Date().addingTimeInterval(60)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            let status = statusLabel.label
+            if status.contains("Failed to read fixture dir") || status.contains("Failed:") {
+                break
+            }
+            sleep(1)
+        }
+
+        let finalStatus = statusLabel.label
+        let finalVolumeCount = Int(volumeCountLabel.label) ?? 0
+        print("[UI] DICOM missing-dir final: status=\(finalStatus) volumeCount=\(finalVolumeCount)")
+
+        XCTAssertTrue(
+            finalStatus.contains("Failed to read fixture dir") || finalStatus.contains("Failed:"),
+            "Expected fixture-dir failure status, got '\(finalStatus)'"
+        )
+        XCTAssertEqual(finalVolumeCount, 0, "Expected no volumes to be loaded when fixture directory is missing.")
+    }
+
+    /// Phase 2 Task 9: DICOM - After loading a real CT series, 1-finger stack scroll should scrub slices.
+    func testDicomImportKiTS23Then2DStackScrollScrubsSlices() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--ui-test-dicom-dir",
+            "dicom-fixtures/VOLUME_MED_E_ABD_3"
+        ]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        let countLabel = app.staticTexts["niivue.volumeCount"]
+        let statusLabel = app.staticTexts["niivue.dicomImportStatusGlobal"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 30))
+        XCTAssertTrue(countLabel.waitForExistence(timeout: 30))
+        XCTAssertTrue(statusLabel.waitForExistence(timeout: 30))
+
+        let readyDeadline = Date().addingTimeInterval(60)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+
+        let loadDeadline = Date().addingTimeInterval(180)
+        while Date() < loadDeadline {
+            let status = statusLabel.label
+            let count = Int(countLabel.label) ?? 0
+            if status.contains("Loaded") && count > 0 { break }
+            if status.contains("Failed") { break }
+            sleep(2)
+        }
+        XCTAssertTrue(statusLabel.label.contains("Loaded"), "Expected DICOM to load before stack scrolling. status='\(statusLabel.label)'")
+
+        // Switch to Axial view (2D) so stack scroll applies.
+        app.buttons["niivue.settings"].tap()
+        let viewTypeMenu = app.buttons["niivue.settings.viewType"]
+        XCTAssertTrue(viewTypeMenu.waitForExistence(timeout: 5))
+        viewTypeMenu.tap()
+
+        let axialOption = app.buttons["Axial"]
+        XCTAssertTrue(axialOption.waitForExistence(timeout: 5))
+        axialOption.tap()
+        app.buttons["Dismiss"].tap()
+
+        let sliceIndexLabel = app.staticTexts["niivue.sliceIndex"]
+        let totalSlicesLabel = app.staticTexts["niivue.totalSlices"]
+        let sliceTypeLabel = app.staticTexts["niivue.sliceType"]
+        let stackScrollEventsLabel = app.staticTexts["niivue.stackScrollEvents"]
+        XCTAssertTrue(sliceIndexLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(totalSlicesLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(sliceTypeLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(stackScrollEventsLabel.waitForExistence(timeout: 10))
+
+        // Wait for slice state to be available.
+        let stateDeadline = Date().addingTimeInterval(30)
+        while Date() < stateDeadline {
+            let sliceType = Int(sliceTypeLabel.label) ?? -1
+            let totalSlices = Int(totalSlicesLabel.label) ?? -1
+            let sliceIndex = Int(sliceIndexLabel.label) ?? -1
+            if sliceType == 0, totalSlices > 1, sliceIndex >= 0 { break }
+            print("[UI] Waiting DICOM slice state: sliceType=\(sliceTypeLabel.label) totalSlices=\(totalSlicesLabel.label) sliceIndex=\(sliceIndexLabel.label)")
+            sleep(1)
+        }
+
+        let totalSlices = Int(totalSlicesLabel.label) ?? -1
+        XCTAssertGreaterThan(totalSlices, 1, "Expected totalSlices > 1 for DICOM stack scroll test, got '\(totalSlicesLabel.label)'.")
+
+        let initialIndex = Int(sliceIndexLabel.label) ?? -1
+        let initialEvents = Int(stackScrollEventsLabel.label) ?? 0
+        print("[UI] DICOM initial stack state: totalSlices=\(totalSlicesLabel.label) sliceIndex=\(sliceIndexLabel.label) stackScrollEvents=\(stackScrollEventsLabel.label)")
+
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(webView.waitForExistence(timeout: 10))
+
+        // Drag up to move forward in the stack (inverted mapping: translationY negative => steps positive).
+        let startVector = CGVector(dx: 0.5, dy: 0.65)
+        let endVector = CGVector(dx: 0.5, dy: 0.35)
+        let start = webView.coordinate(withNormalizedOffset: startVector)
+        let end = webView.coordinate(withNormalizedOffset: endVector)
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline {
+            let events = Int(stackScrollEventsLabel.label) ?? 0
+            let idx = Int(sliceIndexLabel.label) ?? initialIndex
+            if events > initialEvents, idx != initialIndex {
+                break
+            }
+            sleep(1)
+        }
+
+        print("[UI] DICOM final stack state: totalSlices=\(totalSlicesLabel.label) sliceIndex=\(sliceIndexLabel.label) stackScrollEvents=\(stackScrollEventsLabel.label)")
+        XCTAssertGreaterThan(Int(stackScrollEventsLabel.label) ?? 0, initialEvents, "Expected stack scroll to receive drag updates.")
+        let finalIndex = Int(sliceIndexLabel.label) ?? initialIndex
+        XCTAssertNotEqual(finalIndex, initialIndex, "Expected slice index to change after drag.")
+
+        // UX guardrails (avoid extremely sensitive or extremely slow stack scroll).
+        let delta = abs(finalIndex - initialIndex)
+        if totalSlices > 40, (totalSlices - 1 - initialIndex) >= 20 {
+            XCTAssertGreaterThanOrEqual(delta, 3, "Expected drag to scrub at least a few slices (too slow). delta=\(delta)")
+            XCTAssertLessThanOrEqual(delta, 80, "Expected drag not to scrub an excessive number of slices (too sensitive). delta=\(delta)")
+        }
+    }
+
+    /// Phase 2 UX: After loading a real CT series, Window/Level mode should adjust WW/WL and not scrub slices.
+    func testDicomImportKiTS23WindowLevelDoesNotScrollSlices() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--ui-test-dicom-dir",
+            "dicom-fixtures/VOLUME_MED_E_ABD_3"
+        ]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        let countLabel = app.staticTexts["niivue.volumeCount"]
+        let statusLabel = app.staticTexts["niivue.dicomImportStatusGlobal"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 30))
+        XCTAssertTrue(countLabel.waitForExistence(timeout: 30))
+        XCTAssertTrue(statusLabel.waitForExistence(timeout: 30))
+
+        let readyDeadline = Date().addingTimeInterval(60)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+
+        let loadDeadline = Date().addingTimeInterval(180)
+        while Date() < loadDeadline {
+            let status = statusLabel.label
+            let count = Int(countLabel.label) ?? 0
+            if status.contains("Loaded") && count > 0 { break }
+            if status.contains("Failed") { break }
+            sleep(2)
+        }
+        XCTAssertTrue(statusLabel.label.contains("Loaded"), "Expected DICOM to load before window/level. status='\(statusLabel.label)'")
+
+        // Switch to Axial view (2D).
+        app.buttons["niivue.settings"].tap()
+        let viewTypeMenu = app.buttons["niivue.settings.viewType"]
+        XCTAssertTrue(viewTypeMenu.waitForExistence(timeout: 5))
+        viewTypeMenu.tap()
+
+        let axialOption = app.buttons["Axial"]
+        XCTAssertTrue(axialOption.waitForExistence(timeout: 5))
+        axialOption.tap()
+        app.buttons["Dismiss"].tap()
+
+        let sliceIndexLabel = app.staticTexts["niivue.sliceIndex"]
+        let crosshairSliceIndexLabel = app.staticTexts["niivue.crosshairSliceIndex"]
+        let stackScrollEventsLabel = app.staticTexts["niivue.stackScrollEvents"]
+        XCTAssertTrue(sliceIndexLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(crosshairSliceIndexLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(stackScrollEventsLabel.waitForExistence(timeout: 10))
+        let initialCrosshairSliceIndex = crosshairSliceIndexLabel.label
+        let initialStackScrollEvents = stackScrollEventsLabel.label
+
+        let windowWidthLabel = app.staticTexts["niivue.windowWidth"]
+        let windowLevelLabel = app.staticTexts["niivue.windowLevel"]
+        let windowLevelEventsLabel = app.staticTexts["niivue.windowLevelEvents"]
+        XCTAssertTrue(windowWidthLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(windowLevelLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(windowLevelEventsLabel.waitForExistence(timeout: 10))
+
+        let windowLevelToolButton = app.buttons["niivue.tool.windowLevel"]
+        XCTAssertTrue(windowLevelToolButton.waitForExistence(timeout: 10))
+        windowLevelToolButton.tap()
+
+        let initialWW = Double(windowWidthLabel.label) ?? 1
+        let initialWL = Double(windowLevelLabel.label) ?? 0
+        let initialWindowLevelEvents = Int(windowLevelEventsLabel.label) ?? 0
+        print("[UI] DICOM initial window/level: WW=\(windowWidthLabel.label) WL=\(windowLevelLabel.label) wlEvents=\(windowLevelEventsLabel.label) sliceIndex=\(sliceIndexLabel.label) crosshairSliceIndex=\(crosshairSliceIndexLabel.label) stackScrollEvents=\(initialStackScrollEvents)")
+
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(webView.waitForExistence(timeout: 10))
+
+        let startVector = CGVector(dx: 0.5, dy: 0.5)
+        let endVector = CGVector(dx: 0.7, dy: 0.3)
+        let start = webView.coordinate(withNormalizedOffset: startVector)
+        let end = webView.coordinate(withNormalizedOffset: endVector)
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline {
+            let currentEvents = Int(windowLevelEventsLabel.label) ?? 0
+            let ww = Double(windowWidthLabel.label) ?? initialWW
+            let wl = Double(windowLevelLabel.label) ?? initialWL
+            if currentEvents > initialWindowLevelEvents, (ww != initialWW || wl != initialWL) {
+                break
+            }
+            sleep(1)
+        }
+
+        print("[UI] DICOM final window/level: WW=\(windowWidthLabel.label) WL=\(windowLevelLabel.label) wlEvents=\(windowLevelEventsLabel.label)")
+        XCTAssertGreaterThan(Int(windowLevelEventsLabel.label) ?? 0, initialWindowLevelEvents, "Expected window/level handler to receive drag updates.")
+
+        // Verify stable-origin math (prevents mid-drag re-captures that cause jumps).
+        let pointsPerHU = 2.0
+        let translationX = (endVector.dx - startVector.dx) * webView.frame.size.width
+        let translationY = (endVector.dy - startVector.dy) * webView.frame.size.height
+        let expectedWW = max(1.0, initialWW + (Double(translationX) * pointsPerHU))
+        let expectedWL = initialWL - (Double(translationY) * pointsPerHU)
+
+        let finalWW = Double(windowWidthLabel.label) ?? initialWW
+        let finalWL = Double(windowLevelLabel.label) ?? initialWL
+        XCTAssertEqual(finalWW, expectedWW, accuracy: 50, "Expected WW to match translation-based calculation.")
+        XCTAssertEqual(finalWL, expectedWL, accuracy: 50, "Expected WL to match translation-based calculation.")
+
+        XCTAssertEqual(crosshairSliceIndexLabel.label, initialCrosshairSliceIndex, "Expected window/level gesture not to change the crosshair slice index.")
+        XCTAssertEqual(stackScrollEventsLabel.label, initialStackScrollEvents, "Expected window/level gesture not to trigger stack scroll.")
     }
 }
