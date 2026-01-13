@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { addVolumesFromUrls, applyViewerState, exportViewerState, loadMeshesFromUrls } from './volumeCommands'
+import {
+  addVolumesFromUrls,
+  applyViewerState,
+  drawOtsu,
+  exportViewerState,
+  loadMeshesFromUrls,
+  removeVolumeByIndex,
+} from './volumeCommands'
 
 describe('volumeCommands (Phase 2 UI extensions)', () => {
   it('addVolumesFromUrls calls niivue.addVolumesFromUrl with url+name', async () => {
@@ -74,5 +81,39 @@ describe('volumeCommands (Phase 2 UI extensions)', () => {
     expect(nv.setColormap).toHaveBeenCalledWith('v2', 'hot')
     expect(nv.setOpacity).toHaveBeenCalledWith(1, 1.0)
     expect(nv.setFrame4D).toHaveBeenCalledWith('v2', 0)
+  })
+
+  it('removeVolumeByIndex calls niivue.removeVolumeByIndex for valid indices', () => {
+    const nv: any = {
+      volumes: [{ id: 'v1' }, { id: 'v2' }],
+      removeVolumeByIndex: vi.fn(),
+    }
+
+    removeVolumeByIndex(nv, 1)
+
+    expect(nv.removeVolumeByIndex).toHaveBeenCalledWith(1)
+  })
+
+  it('drawOtsu temporarily uses global_min/global_max and restores cal_min/cal_max', () => {
+    const volume: any = {
+      cal_min: 0,
+      cal_max: 100,
+      global_min: -1024,
+      global_max: 3071,
+    }
+
+    const nv: any = {
+      volumes: [volume],
+      drawOtsu: vi.fn(() => {
+        expect(volume.cal_min).toBe(volume.global_min)
+        expect(volume.cal_max).toBe(volume.global_max)
+      }),
+    }
+
+    drawOtsu(nv, 3)
+
+    expect(nv.drawOtsu).toHaveBeenCalledWith(3)
+    expect(volume.cal_min).toBe(0)
+    expect(volume.cal_max).toBe(100)
   })
 })

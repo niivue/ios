@@ -16,6 +16,8 @@ struct NiivueURLRouter {
         // Phase 2 Task 8: DICOM manifest and file endpoints
         case dicomManifest(seriesId: String)           // `dicom/<seriesId>/niivue-manifest.txt`
         case dicomFile(seriesId: String, fileName: String)  // `dicom/<seriesId>/<fileName>`
+        // Phase 2: Native preprocessing (disk-backed) endpoints
+        case preprocessedVolume(studyID: String, itemID: String, parametersHash: String, fileName: String) // `preprocessed/<studyID>/<itemID>/<parametersHash>/<fileName>`
     }
 
     /// Routes a niivue:// URL to the appropriate handler.
@@ -69,6 +71,22 @@ struct NiivueURLRouter {
                 } else {
                     return .dicomFile(seriesId: seriesId, fileName: fileName)
                 }
+
+            case "preprocessed":
+                // Phase 2: preprocessed volumes (native pipeline output)
+                // preprocessed/<studyID>/<itemID>/<parametersHash>/<fileName>
+                guard components.count == 5 else { return nil }
+                let studyID = components[1]
+                let itemID = components[2]
+                let parametersHash = components[3]
+                let fileName = components[4]
+                guard !studyID.isEmpty, !itemID.isEmpty, !parametersHash.isEmpty, !fileName.isEmpty else { return nil }
+                return .preprocessedVolume(
+                    studyID: studyID,
+                    itemID: itemID,
+                    parametersHash: parametersHash,
+                    fileName: fileName
+                )
 
             default:
                 // Default: serve from dist/ (Vite output)

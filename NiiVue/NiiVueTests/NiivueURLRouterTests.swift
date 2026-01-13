@@ -86,6 +86,28 @@ final class NiivueURLRouterTests: XCTestCase {
         let router = NiivueURLRouter()
         XCTAssertNil(router.route(URL(string: "niivue://app/files/")!))
     }
+
+    func testRouterRoutesPreprocessedVolume() {
+        let router = NiivueURLRouter()
+        let url = URL(string: "niivue://app/preprocessed/study1/item1/abc123/preprocessed.nii")!
+        let route = router.route(url)
+        if case .preprocessedVolume(let studyID, let itemID, let parametersHash, let fileName) = route {
+            XCTAssertEqual(studyID, "study1")
+            XCTAssertEqual(itemID, "item1")
+            XCTAssertEqual(parametersHash, "abc123")
+            XCTAssertEqual(fileName, "preprocessed.nii")
+        } else {
+            XCTFail("Expected .preprocessedVolume route")
+        }
+    }
+
+    func testRouterRejectsPreprocessedWithoutRequiredSegments() {
+        let router = NiivueURLRouter()
+        XCTAssertNil(router.route(URL(string: "niivue://app/preprocessed/study1")!))
+        XCTAssertNil(router.route(URL(string: "niivue://app/preprocessed/study1/item1")!))
+        XCTAssertNil(router.route(URL(string: "niivue://app/preprocessed/study1/item1/abc123")!))
+        XCTAssertNil(router.route(URL(string: "niivue://app/preprocessed/study1/item1/abc123/")!))
+    }
 }
 
 final class NiivueURLSchemeHandlerStreamingTests: XCTestCase {
@@ -118,6 +140,59 @@ final class NiivueURLSchemeHandlerStreamingTests: XCTestCase {
         let handler = await MainActor.run { () -> NiivueURLSchemeHandler in
             let handler = NiivueURLSchemeHandler()
             handler.importedFileStore = store
+            return handler
+        }
+
+        await MainActor.run {
+            handler.webView(WKWebView(frame: .zero), start: schemeTask)
+        }
+
+        await fulfillment(of: [finished], timeout: 2.0)
+
+        XCTAssertNil(schemeTask.failedError)
+        XCTAssertTrue(schemeTask.didFinishCalled)
+        XCTAssertEqual(schemeTask.nonMainThreadCallbackCount, 0)
+        XCTAssertEqual(schemeTask.receivedResponses.count, 1)
+        XCTAssertGreaterThan(schemeTask.receivedDataChunks.count, 1)
+
+        var combined = Data()
+        for chunk in schemeTask.receivedDataChunks {
+            combined.append(chunk)
+        }
+        XCTAssertEqual(combined, expectedData)
+    }
+
+    func testPreprocessedVolumeIsStreamedInMultipleChunks() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let cacheDir = tempDir.appendingPathComponent("cache", isDirectory: true)
+        let cache = PreprocessedVolumeCache(baseURL: cacheDir)
+
+        let expectedData = Data((0..<(256 * 1024 + 7)).map { UInt8(truncatingIfNeeded: $0) })
+        let sourceFile = tempDir.appendingPathComponent("source.nii", isDirectory: false)
+        try expectedData.write(to: sourceFile)
+
+        let parameters = CTPreprocessingParameters.urinaryTractDefaults
+        let result = PreprocessedResult(
+            outputURL: sourceFile,
+            processingTime: 0.01,
+            parameters: parameters
+        )
+
+        try await cache.store(studyID: "study1", itemID: "item1", result: result)
+
+        let finished = expectation(description: "scheme task finished")
+        let schemeTask = MockURLSchemeTask(
+            url: URL(string: "niivue://app/preprocessed/study1/item1/\(parameters.parametersHash)/preprocessed.nii")!,
+            finished: finished
+        )
+
+        let handler = await MainActor.run { () -> NiivueURLSchemeHandler in
+            let handler = NiivueURLSchemeHandler()
+            handler.preprocessedVolumeCache = cache
             return handler
         }
 

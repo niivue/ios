@@ -25,6 +25,8 @@ import {
   setDrawOpacity as nvSetDrawOpacity,
   setDrawColormap as nvSetDrawColormap,
   setClickToSegmentEnabled as nvSetClickToSegmentEnabled,
+  drawOtsu as nvDrawOtsu,
+  removeVolumeByIndex as nvRemoveVolumeByIndex,
   addVolumesFromUrls as nvAddVolumesFromUrls,
   loadMeshesFromUrls as nvLoadMeshesFromUrls,
   exportViewerState as nvExportViewerState,
@@ -78,6 +80,9 @@ declare global {
     setDrawOpacity: (opacity: number) => void,
     setDrawColormap: (colormap: string) => void,
     setClickToSegmentEnabled: (enabled: boolean) => void,
+    clickToSegmentAtScreenPoint: (xCss: number, yCss: number) => void,
+    drawOtsu: (levels: number) => void,
+    removeVolumeByIndex: (volumeIndex: number) => void,
     // Phase 2 Task 7: DICOM manifest loading
     loadDicomSeriesFromManifest: (manifestUrl: string) => Promise<void>,
     // CT Adaptive Engine (NEW)
@@ -143,6 +148,7 @@ function App() {
       loadingText: 'Loading...',
     }
   ));
+  const clickToSegmentApplyCount = React.useRef(0)
   const nv = nvRef.current;
   const backgroundColor = 'black'
 
@@ -344,6 +350,17 @@ function App() {
 
     await nv.attachToCanvas(canvasRef.current);
     nv.onLocationChange = onLocationChange;
+
+    ;(nv as any).onClickToSegment = (data: any) => {
+      const mm3 = typeof data?.mm3 === 'number' ? data.mm3 : null
+      const mL = typeof data?.mL === 'number' ? data.mL : null
+      logToIOS('info', `[Segmentation] onClickToSegment mm3=${mm3} mL=${mL}`)
+      postToIOS('updateUI', {
+        type: 'clickToSegmentResult',
+        payload: { mm3, mL },
+      })
+    }
+
     // Phase 2 UI: Clip plane change notifications (used for 3D slice scrolling + UI test instrumentation)
     nv.onClipPlaneChange = () => {
       const anyNv = nv as any
@@ -513,6 +530,83 @@ function App() {
     nvSetClickToSegmentEnabled(nv, enabled)
   }
 
+  function canvasPixelsFromClientPoint(xClient: number, yClient: number): { x: number; y: number; dpr: number } | null {
+    const anyNv = nv as any
+    const canvas = (anyNv.canvas ?? canvasRef.current) as HTMLCanvasElement | null | undefined
+    if (!canvas) {
+      return null
+    }
+
+    const rect = canvas.getBoundingClientRect()
+    const dpr = (anyNv.uiData?.dpr ?? window.devicePixelRatio ?? 1) as number
+    return {
+      x: (xClient - rect.left) * dpr,
+      y: (yClient - rect.top) * dpr,
+      dpr,
+    }
+  }
+
+  function clickToSegmentAtScreenPoint(xCss: number, yCss: number): void {
+    const anyNv = nv as any
+    const pixels = canvasPixelsFromClientPoint(xCss, yCss)
+    if (!pixels) {
+      logToIOS('warn', `[Segmentation] clickToSegmentAtScreenPoint skipped: no canvas pixels for xCss=${xCss}, yCss=${yCss}`)
+      return
+    }
+    const x = pixels.x
+    const y = pixels.y
+
+    anyNv.opts.clickToSegmentIs2D = true
+    anyNv.opts.clickToSegmentAutoIntensity = true
+
+    const tileIndex = anyNv.tileIndex(x, y) as number
+    anyNv.clickToSegmentXY = [x, y]
+    anyNv.clickToSegmentIsGrowing = false
+    anyNv.doClickToSegment({ x, y, tileIndex })
+    nv.drawScene()
+
+    clickToSegmentApplyCount.current += 1
+    const drawBitmap = anyNv.drawBitmap as Uint8Array | null | undefined
+    const drawSum = drawBitmap && typeof anyNv.sumBitmap === 'function' ? (anyNv.sumBitmap(drawBitmap) as number) : 0
+
+    logToIOS(
+      'info',
+      `[Segmentation] clickToSegmentAtScreenPoint applyCount=${clickToSegmentApplyCount.current} xCss=${xCss} yCss=${yCss} x=${x} y=${y} tileIndex=${tileIndex} drawSum=${drawSum}`
+    )
+    postToIOS('updateUI', {
+      type: 'clickToSegmentDebug',
+      payload: { applyCount: clickToSegmentApplyCount.current, drawSum },
+    })
+  }
+
+  function drawOtsu(levels: number): void {
+    const anyNv = nv as any
+    const clampedLevels = Math.max(2, Math.min(4, Math.round(levels)))
+
+    try {
+      nvDrawOtsu(nv, clampedLevels)
+      nv.drawScene()
+
+      const drawBitmap = anyNv.drawBitmap as Uint8Array | null | undefined
+      const drawSum = drawBitmap && typeof anyNv.sumBitmap === 'function' ? (anyNv.sumBitmap(drawBitmap) as number) : 0
+
+      logToIOS('info', `[Segmentation] drawOtsu levels=${clampedLevels} drawSum=${drawSum}`)
+      postToIOS('updateUI', {
+        type: 'drawingDebug',
+        payload: { operation: 'drawOtsu', drawSum },
+      })
+    } catch (error) {
+      logToIOS('error', `[Segmentation] drawOtsu failed: ${describeError(error)}`)
+      throw error
+    }
+  }
+
+  function removeVolumeByIndex(volumeIndex: number): void {
+    const clampedIndex = Math.max(0, Math.floor(volumeIndex))
+    nvRemoveVolumeByIndex(nv, clampedIndex)
+    nv.drawScene()
+  }
+
   // Phase 2 Task 7: DICOM manifest loading
   async function loadDicomSeriesFromManifest(manifestUrl: string): Promise<void> {
     const start = Date.now()
@@ -608,6 +702,9 @@ function App() {
     window.setDrawOpacity = setDrawOpacity  // Phase 2 Task 5: Draw opacity
     window.setDrawColormap = setDrawColormap  // Phase 2 Task 5: Draw colormap
     window.setClickToSegmentEnabled = setClickToSegmentEnabled  // Phase 2 Task 5: Click-to-segment
+    window.clickToSegmentAtScreenPoint = clickToSegmentAtScreenPoint
+    window.drawOtsu = drawOtsu
+    window.removeVolumeByIndex = removeVolumeByIndex
     window.loadDicomSeriesFromManifest = loadDicomSeriesFromManifest  // Phase 2 Task 7: DICOM manifest
     window.setCrosshairColor = setCrosshairColor
     window.saveDrawing = saveDrawing

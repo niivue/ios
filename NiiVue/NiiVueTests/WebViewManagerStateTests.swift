@@ -20,6 +20,11 @@ final class WebViewManagerStateTests: XCTestCase {
         XCTAssertTrue(script.isForMainFrameOnly)
     }
 
+    func testWebViewManagerWiresPreprocessedVolumeCacheToURLSchemeHandler() async throws {
+        let manager = WebViewManager(evaluator: MockJavaScriptEvaluator())
+        XCTAssertNotNil(manager.urlSchemeHandler.preprocessedVolumeCache)
+    }
+
     func testUpdateUICTPresetAnalysisUpdatesPublishedState() async throws {
         let manager = WebViewManager(evaluator: MockJavaScriptEvaluator())
 
@@ -39,6 +44,25 @@ final class WebViewManagerStateTests: XCTestCase {
         XCTAssertEqual(analysis.calMax, 180, accuracy: 0.0001)
         XCTAssertEqual(analysis.windowWidth, 120, accuracy: 0.0001)
         XCTAssertEqual(analysis.windowLevel, 120, accuracy: 0.0001)
+    }
+
+    func testUpdateUIDrawingDebugUpdatesPublishedState() async throws {
+        let manager = WebViewManager(evaluator: MockJavaScriptEvaluator())
+
+        XCTAssertNil(manager.lastDrawingOperation)
+        XCTAssertNil(manager.lastDrawingDrawSum)
+
+        manager.handleScriptMessage(
+            name: "updateUI",
+            body: """
+            {"type":"drawingDebug","payload":{"operation":"drawOtsu","drawSum":1234}}
+            """
+        )
+
+        let operation = try XCTUnwrap(manager.lastDrawingOperation)
+        let drawSum = try XCTUnwrap(manager.lastDrawingDrawSum)
+        XCTAssertEqual(operation, "drawOtsu")
+        XCTAssertEqual(drawSum, 1234, accuracy: 0.0001)
     }
 
     func testInitializationTimeoutSetsErrorMessage() async throws {

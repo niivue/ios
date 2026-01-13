@@ -222,6 +222,57 @@ final class WebViewManagerCommandTests: XCTestCase {
         XCTAssertEqual(decoded.viewerState.volumes.count, 0)
     }
 
+    // MARK: - Viewer Volume Commands (Unload + Visibility)
+
+    func testRemoveVolumeByIndexBuildsCorrectJSCallAndUpdatesVolumeSources() async throws {
+        let js = MockJavaScriptEvaluator()
+        js.nextAsyncString = "[{\"id\":\"v2\",\"name\":\"B\",\"nFrame4D\":1}]"
+        let manager = WebViewManager(evaluator: js)
+        manager.volumes = [
+            .init(id: "v1", name: "A", nFrame4D: 1),
+            .init(id: "v2", name: "B", nFrame4D: 1),
+        ]
+        manager.volumeSources = [
+            .init(url: "niivue://app/files/a", name: "a.nii.gz"),
+            .init(url: "niivue://app/files/b", name: "b.nii.gz"),
+        ]
+
+        try await manager.removeVolumeByIndex(volumeIndex: 0)
+
+        XCTAssertEqual(js.scripts.first, "window.removeVolumeByIndex(0)")
+        XCTAssertTrue(js.scripts.contains(where: { $0.contains("window.getVolumeInfoList") }))
+        XCTAssertEqual(manager.volumeSources, [.init(url: "niivue://app/files/b", name: "b.nii.gz")])
+    }
+
+    func testSetVolumeVisibleSavesOpacityAndRestores() async throws {
+        let js = MockJavaScriptEvaluator()
+        let manager = WebViewManager(evaluator: js)
+        manager.volumes = [.init(id: "v1", name: "A", nFrame4D: 1)]
+
+        try await manager.setOpacity(volumeIndex: 0, opacity: 0.25)
+        try await manager.setVolumeVisible(volumeIndex: 0, isVisible: false)
+        try await manager.setVolumeVisible(volumeIndex: 0, isVisible: true)
+
+        XCTAssertEqual(js.scripts.count, 3)
+        XCTAssertTrue(js.scripts[0].contains("window.setOpacity(0"))
+        XCTAssertTrue(js.scripts[0].contains("0.25"))
+        XCTAssertTrue(js.scripts[1].contains("window.setOpacity(0"))
+        XCTAssertTrue(js.scripts[1].contains(", 0"))
+        XCTAssertTrue(js.scripts[2].contains("window.setOpacity(0"))
+        XCTAssertTrue(js.scripts[2].contains("0.25"))
+    }
+
+    // MARK: - Segmentation Commands
+
+    func testDrawOtsuBuildsCorrectJSCall() async throws {
+        let js = MockJavaScriptEvaluator()
+        let manager = WebViewManager(evaluator: js)
+
+        try await manager.drawOtsu(levels: 3)
+
+        XCTAssertEqual(js.scripts, ["window.drawOtsu(3)"])
+    }
+
     // MARK: - CT Presets (Adaptive Engine)
 
     func testSetAutoApplyCTPresetWritesBooleanLiteral() async throws {

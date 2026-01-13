@@ -383,6 +383,114 @@ final class NiiVueUITests: XCTestCase {
         XCTAssertTrue(isSwitchOn(drawingEnabled), "Expected 'Drawing enabled' to be ON after enabling click-to-segment.")
     }
 
+    /// Segmentation UX: Tapping the viewer with click-to-segment enabled should trigger the JS bridge and emit a JS log.
+    func testSegmentationClickToSegmentTapEmitsJSLog() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-load-multiple"]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        let errorLabel = app.staticTexts["niivue.lastError"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 15))
+        XCTAssertTrue(errorLabel.waitForExistence(timeout: 15))
+
+        let readyDeadline = Date().addingTimeInterval(30)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready" { break }
+            print("[UI] niivue.isReady label = \(readyLabel.label); lastError = \(errorLabel.label)")
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready", "WebView never became ready; lastError='\(errorLabel.label)'.")
+
+        // Ensure we are in a 2D slice view (tap-to-segment is only wired for 2D slice types).
+        app.buttons["niivue.settings"].tap()
+        let viewTypeMenu = app.buttons["niivue.settings.viewType"]
+        XCTAssertTrue(viewTypeMenu.waitForExistence(timeout: 5))
+        viewTypeMenu.tap()
+
+        let axialOption = app.buttons["Axial"]
+        XCTAssertTrue(axialOption.waitForExistence(timeout: 5))
+        axialOption.tap()
+        app.buttons["Dismiss"].tap()
+
+        // Enable click-to-segment in the Segmentation sheet.
+        app.buttons["niivue.segmentation"].tap()
+        XCTAssertTrue(app.otherElements["niivue.segmentationSheet"].waitForExistence(timeout: 2))
+
+        let clickToSegment = app.switches["niivue.segmentation.clickToSegment"]
+        if !clickToSegment.waitForExistence(timeout: 2) {
+            let scrollView = app.scrollViews.firstMatch
+            for _ in 0..<6 where !clickToSegment.exists {
+                if scrollView.exists {
+                    scrollView.swipeUp()
+                } else {
+                    app.swipeUp()
+                }
+            }
+        }
+        XCTAssertTrue(clickToSegment.waitForExistence(timeout: 5))
+
+        if !isSwitchOn(clickToSegment) {
+            clickToSegment.tap()
+            if !isSwitchOn(clickToSegment) {
+                tapTrailingEdge(of: clickToSegment)
+            }
+        }
+        let clickDeadline = Date().addingTimeInterval(3)
+        while Date() < clickDeadline, !isSwitchOn(clickToSegment) {
+            sleep(1)
+        }
+        XCTAssertTrue(isSwitchOn(clickToSegment), "Expected 'Click-to-segment' to be ON after tapping the switch.")
+
+        app.buttons["Done"].tap()
+
+        let lastJSLog = app.staticTexts["niivue.lastJSLog"]
+        XCTAssertTrue(lastJSLog.waitForExistence(timeout: 5))
+        let previousLog = lastJSLog.label
+
+        let applyCountLabel = app.staticTexts["niivue.clickToSegment.applyCount"]
+        let drawSumLabel = app.staticTexts["niivue.clickToSegment.drawSum"]
+        let volumeMLLabel = app.staticTexts["niivue.clickToSegment.volumeML"]
+        XCTAssertTrue(applyCountLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(drawSumLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(volumeMLLabel.waitForExistence(timeout: 5))
+
+        let previousApplyCountString = applyCountLabel.label
+        let previousDrawSumString = drawSumLabel.label
+        let previousVolumeMLString = volumeMLLabel.label
+
+        let previousApplyCount = Int(previousApplyCountString) ?? 0
+        let previousDrawSum = Int(previousDrawSumString) ?? 0
+
+        // Tap near the center of the viewer area (avoid the top toolbar).
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).tap()
+
+        // Expect the React bridge to emit a segmentation log after the tap,
+        // and the JS layer to report click-to-segment debug metrics to Swift UI tests.
+        let logPredicate = NSPredicate(format: "label CONTAINS[c] %@", "clickToSegmentAtScreenPoint")
+        expectation(for: logPredicate, evaluatedWith: lastJSLog)
+
+        let applyCountChanged = NSPredicate(format: "label != %@", previousApplyCountString)
+        expectation(for: applyCountChanged, evaluatedWith: applyCountLabel)
+
+        waitForExpectations(timeout: 15)
+
+        XCTAssertNotEqual(lastJSLog.label, previousLog, "Expected niivue.lastJSLog to change after click-to-segment tap.")
+
+        let newApplyCount = Int(applyCountLabel.label) ?? 0
+        let newDrawSum = Int(drawSumLabel.label) ?? 0
+
+        XCTAssertGreaterThan(newApplyCount, previousApplyCount, "Expected click-to-segment applyCount to increase.")
+        XCTAssertGreaterThan(newDrawSum, previousDrawSum, "Expected click-to-segment to modify the drawing bitmap (drawSum).")
+
+        XCTContext.runActivity(named: "Screenshot: After click-to-segment tap") { activity in
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.lifetime = .keepAlways
+            activity.add(attachment)
+            print("[UI] clickToSegment volume mL label = \(volumeMLLabel.label) (previous: \(previousVolumeMLString))")
+        }
+    }
+
     /// 3D Render UX: Pinching in Render view should enable clipping so users can "scroll" through slices.
     func testRenderPinchEnablesClipPlaneForSliceScroll() throws {
         let app = XCUIApplication()

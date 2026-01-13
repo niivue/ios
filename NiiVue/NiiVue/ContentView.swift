@@ -242,6 +242,7 @@ struct ViewportInteractionHandler: UIViewRepresentable {
     var onOneFingerPanBegan: ((CGPoint) -> Void)? = nil
     var onOneFingerPanChanged: ((CGPoint, CGSize, CGSize) -> Void)? = nil
     var onOneFingerPanEnded: (() -> Void)? = nil
+    var onOneFingerTap: ((CGPoint) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -260,7 +261,8 @@ struct ViewportInteractionHandler: UIViewRepresentable {
             ,
             onOneFingerPanBegan: onOneFingerPanBegan,
             onOneFingerPanChanged: onOneFingerPanChanged,
-            onOneFingerPanEnded: onOneFingerPanEnded
+            onOneFingerPanEnded: onOneFingerPanEnded,
+            onOneFingerTap: onOneFingerTap
         )
     }
 
@@ -320,6 +322,7 @@ struct ViewportInteractionHandler: UIViewRepresentable {
         private let onOneFingerPanBegan: ((CGPoint) -> Void)?
         private let onOneFingerPanChanged: ((CGPoint, CGSize, CGSize) -> Void)?
         private let onOneFingerPanEnded: (() -> Void)?
+        private let onOneFingerTap: ((CGPoint) -> Void)?
         private var installTarget: InstallTarget
 
         private weak var installedOnView: UIView?
@@ -329,6 +332,7 @@ struct ViewportInteractionHandler: UIViewRepresentable {
 
         private var oneFingerDragStartLocation: CGPoint?
         private var oneFingerDragLastLocation: CGPoint?
+        private var oneFingerDragStartTimestamp: TimeInterval?
         private var oneFingerDragLastTimestamp: TimeInterval?
 
         private var isEnabled: Bool = true
@@ -356,7 +360,8 @@ struct ViewportInteractionHandler: UIViewRepresentable {
             onPinchEnded: (() -> Void)?,
             onOneFingerPanBegan: ((CGPoint) -> Void)?,
             onOneFingerPanChanged: ((CGPoint, CGSize, CGSize) -> Void)?,
-            onOneFingerPanEnded: (() -> Void)?
+            onOneFingerPanEnded: (() -> Void)?,
+            onOneFingerTap: ((CGPoint) -> Void)?
         ) {
             self.offsetBinding = offset
             self.scaleBinding = scale
@@ -373,6 +378,7 @@ struct ViewportInteractionHandler: UIViewRepresentable {
             self.onOneFingerPanBegan = onOneFingerPanBegan
             self.onOneFingerPanChanged = onOneFingerPanChanged
             self.onOneFingerPanEnded = onOneFingerPanEnded
+            self.onOneFingerTap = onOneFingerTap
             super.init()
             self.lastSyncedOffset = offset.wrappedValue
             self.lastSyncedScale = scale.wrappedValue
@@ -551,6 +557,7 @@ struct ViewportInteractionHandler: UIViewRepresentable {
             case .began:
                 oneFingerDragStartLocation = location
                 oneFingerDragLastLocation = location
+                oneFingerDragStartTimestamp = now
                 oneFingerDragLastTimestamp = now
                 if simulateTwoFingerPanWithOneFinger {
                     onPanBegan?(location)
@@ -585,13 +592,28 @@ struct ViewportInteractionHandler: UIViewRepresentable {
                 }
 
             case .ended, .cancelled, .failed:
+                let startLocation = oneFingerDragStartLocation
+                let startTimestamp = oneFingerDragStartTimestamp
                 oneFingerDragStartLocation = nil
                 oneFingerDragLastLocation = nil
+                oneFingerDragStartTimestamp = nil
                 oneFingerDragLastTimestamp = nil
                 if simulateTwoFingerPanWithOneFinger {
                     onPanEnded?()
                 } else {
                     onOneFingerPanEnded?()
+                }
+
+                if !simulateTwoFingerPanWithOneFinger,
+                   let startLocation,
+                   let startTimestamp {
+                    let duration = now - startTimestamp
+                    let dx = location.x - startLocation.x
+                    let dy = location.y - startLocation.y
+                    let distance = hypot(dx, dy)
+                    if duration <= 0.35, distance <= 12 {
+                        onOneFingerTap?(location)
+                    }
                 }
 
             default:
@@ -1466,8 +1488,852 @@ struct ContentView: View {
         }
     }
 
-    var body: some View {
-        VStack {
+    private func handleWebViewReadyChanged(isReady: Bool) {
+        guard isReady else { return }
+
+        Task {
+            do {
+                // Phase 2 Task 2: UI test path loads multiple volumes
+                if isUITestLoadMultiple {
+                    print("[ContentView] Loading 2 volumes for UI test")
+                    let sample1 = (url: "niivue://app/samples/ui-test-volume-1.nii", name: "ui-test-volume-1.nii")
+                    let sample2 = (url: "niivue://app/samples/ui-test-volume-2.nii", name: "ui-test-volume-2.nii")
+                    try await webViewManager.loadVolumesFromUrls([sample1, sample2])
+                    print("[ContentView] loadVolumesFromUrls returned, volumes.count = \(webViewManager.volumes.count)")
+                } else if let relativeDir = uiTestDicomRelativeDirectory {
+                    await MainActor.run {
+                        dicomImportInProgress = true
+                        dicomImportStatusMessage = "Loading DICOM fixture…"
+                    }
+
+                    defer {
+                        Task { @MainActor in
+                            dicomImportInProgress = false
+                        }
+                    }
+
+                    let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    let fixtureDir = documentsDir.appendingPathComponent(relativeDir, isDirectory: true)
+
+                    let fileURLs: [URL]
+                    do {
+                        fileURLs = try FileManager.default.contentsOfDirectory(
+                            at: fixtureDir,
+                            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+                            options: [.skipsHiddenFiles]
+                        )
+                    } catch {
+                        await MainActor.run {
+                            dicomImportStatusMessage = "Failed to read fixture dir: \(error.localizedDescription)"
+                        }
+                        return
+                    }
+
+                    let dicomFiles = fileURLs
+                        .filter { url in
+                            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
+                            guard values?.isDirectory != true else { return false }
+                            guard values?.isRegularFile != false else { return false }
+                            let ext = url.pathExtension.lowercased()
+                            return ext == "dcm" || ext == "dicom" || ext.isEmpty
+                        }
+                        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+                    guard !dicomFiles.isEmpty else {
+                        await MainActor.run {
+                            dicomImportStatusMessage = "Failed: no DICOM files found in fixture dir."
+                        }
+                        return
+                    }
+
+                    await MainActor.run {
+                        dicomImportStatusMessage = "Loading \(dicomFiles.count) DICOM file(s)…"
+                    }
+
+                    let seriesId = await dicomSeriesStore.register(files: dicomFiles)
+                    webViewManager.urlSchemeHandler.dicomSeriesStore = dicomSeriesStore
+
+                    let manifestURL = "niivue://app/dicom/\(seriesId)/niivue-manifest.txt"
+                    do {
+                        try await webViewManager.loadDicomSeriesFromManifestURL(manifestURL)
+                        await MainActor.run {
+                            dicomImportStatusMessage = "Loaded \(dicomFiles.count) DICOM file(s)."
+                        }
+                    } catch {
+                        await MainActor.run {
+                            let message = "Failed to load DICOM series: \(error.localizedDescription)"
+                            dicomImportStatusMessage = message
+                            webViewManager.lastErrorMessage = message
+                        }
+                    }
+                } else {
+                    // Normal path: load single demo image
+                    let sampleURL = "niivue://app/samples/T1w_DEMO.nii.gz"
+                    let fileName = "T1w_DEMO.nii.gz"
+                    try await webViewManager.loadImageFromUrl(url: sampleURL, fileName: fileName)
+
+                    // Update UI state to show filename
+                    await MainActor.run {
+                        pickedDocumentURL = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples")
+                    }
+                }
+
+                if let updated = try? await webViewManager.getIntensityWindow(volumeIndex: 0) {
+                    await MainActor.run {
+                        windowWidth = max(1.0, updated.windowWidth)
+                        windowLevel = updated.windowLevel
+                    }
+                }
+            } catch {
+                print("Error loading sample image: \(error)")
+
+                // Fallback to base64 if URL-based fails (limited by maxBase64FallbackBytes)
+                if !isUITestLoadMultiple, let url = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples") {
+                    let maxBytes = maxBase64FallbackBytes
+                    let encodedString = await Task.detached(priority: .userInitiated) {
+                        Base64FileEncoder.encodeFileToBase64(url: url, maxBytes: maxBytes)
+                    }.value
+
+                    await MainActor.run {
+                        pickedDocumentURL = url
+                        if let encodedString {
+                            base64EncodedString = encodedString
+                        } else {
+                            webViewManager.lastErrorMessage = "Failed to load bundled sample (base64 fallback skipped)."
+                        }
+                    }
+                }
+
+                if isUITestLoadMultiple {
+                    await MainActor.run {
+                        webViewManager.lastErrorMessage = "UI test volume load failed: \(error.localizedDescription)"
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func handleBase64EncodedStringChanged(_ newValue: String?) {
+        print("Base64 string updated")
+        guard let safeBase64 = newValue, let fileName = pickedDocumentURL?.lastPathComponent else { return }
+
+        Task {
+            do {
+                try await webViewManager.loadBase64Image(base64: safeBase64, fileName: fileName)
+            } catch {
+                print("Error loading base64 image: \(error)")
+            }
+        }
+    }
+
+    @MainActor
+    private func handleSliceTypeChanged(_ newValue: Int) {
+        print("sliceType updated to: \(newValue)")
+
+        if !(newValue == SliceTypes.Axial.rawValue || newValue == SliceTypes.Coronal.rawValue || newValue == SliceTypes.Sagittal.rawValue) {
+            toolMode = .scroll
+            windowLevelIsDragging = false
+            windowLevelDragStartWindowWidth = nil
+            windowLevelDragStartWindowLevel = nil
+        }
+
+        Task {
+            do {
+                try await webViewManager.setSliceType(sliceType: newValue)
+
+                // In 2D slice views, the native gesture system owns dragging. Disable Niivue drag mode to
+                // prevent the underlying web content from competing with native gestures.
+                if newValue == SliceTypes.Axial.rawValue || newValue == SliceTypes.Coronal.rawValue || newValue == SliceTypes.Sagittal.rawValue {
+                    try await webViewManager.setDragMode(dragMode: DragTypes.None.rawValue)
+                } else {
+                    try await webViewManager.setDragMode(dragMode: dragType)
+                }
+            } catch {
+                print("Error setting slice type: \(error)")
+            }
+        }
+
+        if (newValue == SliceTypes.Axial.rawValue) {
+            incrementText = "S" // superior
+            decrementText = "I" // inferior
+            sliceTypeText = "A"
+        } else if (newValue == SliceTypes.Coronal.rawValue) {
+            incrementText = "A" // anterior
+            decrementText = "P" // posterior
+            sliceTypeText = "C"
+        } else if (newValue == SliceTypes.Sagittal.rawValue) {
+            incrementText = "R" // right
+            decrementText = "L" // left
+            sliceTypeText = "S"
+        }
+    }
+
+    @MainActor
+    private func handleLayoutChanged(_ newValue: Int) {
+        print("layout updated to: \(newValue)")
+        Task {
+            do {
+                try await webViewManager.setLayout(layout: newValue)
+            } catch {
+                print("Error setting layout: \(error)")
+            }
+        }
+    }
+
+    @MainActor
+    private func handleDragTypeChanged(_ newValue: Int) {
+        print("drag type updated to: \(newValue)")
+
+        guard !is2DSliceType else {
+            // 2D slice views are driven by native gestures; ignore dragMode changes here.
+            return
+        }
+
+        Task {
+            do {
+                try await webViewManager.setDragMode(dragMode: newValue)
+            } catch {
+                print("Error setting drag mode: \(error)")
+            }
+        }
+    }
+
+    @MainActor
+    private func handleShow3dCrosshairChanged(_ newValue: Bool) {
+        print("show3dCrosshair updated to: \(newValue)")
+        Task {
+            do {
+                try await webViewManager.set3dCrosshairVisible(visible: newValue)
+            } catch {
+                print("Error setting 3D crosshair: \(error)")
+            }
+        }
+    }
+
+    @MainActor
+    private func handleShow2dCrosshairChanged(_ newValue: Bool) {
+        print("show2dCrosshair updated to: \(newValue)")
+        Task {
+            do {
+                try await webViewManager.set2dCrosshairVisible(visible: newValue)
+            } catch {
+                print("Error setting 2D crosshair: \(error)")
+            }
+        }
+    }
+
+    @MainActor
+    private func handleIsFilledChanged(_ newValue: Bool) {
+        print("isFilled updated to: \(newValue)")
+        Task {
+            do {
+                try await webViewManager.setPenValue(penValue: penValue, isFilled: newValue, drawingEnabled: drawingEnabled)
+            } catch {
+                print("Error setting pen value: \(error)")
+            }
+        }
+    }
+
+    @MainActor
+    private func handleDrawingEnabledChanged(_ newValue: Bool) {
+        print("drawingEnabled updated to: \(newValue)")
+        Task {
+            do {
+                try await webViewManager.setPenValue(penValue: penValue, isFilled: isFilled, drawingEnabled: newValue)
+            } catch {
+                print("Error setting drawing enabled: \(error)")
+            }
+        }
+    }
+
+    @MainActor
+    private func handleCornerTextChanged(_ newValue: Bool) {
+        print("cornerText updated to: \(newValue)")
+        Task {
+            do {
+                try await webViewManager.setCornerText(isCorners: newValue)
+            } catch {
+                print("Error setting corner text: \(error)")
+            }
+        }
+    }
+
+    @MainActor
+    private func handleOrientationCubeChanged(_ newValue: Bool) {
+        print("orientationCube updated to: \(newValue)")
+        Task {
+            do {
+                try await webViewManager.setOrientationCube(isOrientationCube: newValue)
+            } catch {
+                print("Error setting orientation cube: \(error)")
+            }
+        }
+    }
+
+    @MainActor
+    private func handleRadiologicalChanged(_ newValue: Bool) {
+        print("radiological updated to: \(newValue)")
+        Task {
+            do {
+                try await webViewManager.setRadiological(isRadiological: newValue)
+            } catch {
+                print("Error setting radiological: \(error)")
+            }
+        }
+    }
+
+    @MainActor
+    private func handlePenValueChanged(_ newValue: Int) {
+        print("penValue updated to: \(newValue)")
+        Task {
+            do {
+                try await webViewManager.setPenValue(penValue: newValue, isFilled: isFilled, drawingEnabled: drawingEnabled)
+            } catch {
+                print("Error setting pen value: \(error)")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var settingsSheetContent: some View {
+        ScrollView {
+            VStack(alignment: .leading) {
+                //-----------------------------------------------------
+                // dismiss button in top right corner of sheet
+                HStack {
+                    Spacer() // push button to the right (ios guidelines for sheets)
+                    Button("Dismiss") {
+                        settingsSheetPresented.toggle()
+                    }
+                    .padding()
+                }
+                .padding()
+                //-----------------------------------------------------
+                // picker for the slice type
+                HStack {
+                    Text("View type")
+                        .padding()
+                    Spacer()
+                    Picker("View mode", selection: $sliceType) {
+                        Text("Axial").tag(SliceTypes.Axial.rawValue)
+                        Text("Coronal").tag(SliceTypes.Coronal.rawValue)
+                        Text("Sagittal").tag(SliceTypes.Sagittal.rawValue)
+                        Text("Multiplanar").tag(SliceTypes.Multiplanar.rawValue)
+                        Text("Render").tag(SliceTypes.Render.rawValue)
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("niivue.settings.viewType")
+                    .padding()
+                }
+                //------------------------------------------------------
+                // picker for the layout type of multiplanar
+                HStack {
+                    Text("Multiplanar layout ")
+                        .padding()
+                    Spacer()
+                    Picker("layout mode", selection: $layout) {
+                        Text("Auto").tag(LayoutTypes.Auto.rawValue)
+                        Text("Column").tag(LayoutTypes.Column.rawValue)
+                        Text("Grid").tag(LayoutTypes.Grid.rawValue)
+                        Text("Row").tag(LayoutTypes.Row.rawValue)
+                    }
+                    .pickerStyle(.menu)
+                    .padding()
+                }
+                //------------------------------------------------------
+                // picker for the drag type
+                HStack {
+                    Text(dragLabel)
+                        .padding()
+                    Spacer()
+                    Picker("Drag mode", selection: $dragType) {
+                        Text("None").tag(DragTypes.None.rawValue)
+                        Text("Contrast").tag(DragTypes.Contrast.rawValue)
+                        Text("Measure").tag(DragTypes.Measure.rawValue)
+                        Text("Pan").tag(DragTypes.Pan.rawValue)
+                        Text("Slicer3D").tag(DragTypes.Slicer3D.rawValue)
+                    }
+                    .pickerStyle(.menu)
+                    .padding()
+                }
+                //------------------------------------------------------
+                // picker for the pen type
+                HStack {
+                    Text("Pen type")
+                        .padding()
+                    Spacer()
+                    Picker("Pen type", selection: $penValue) {
+                        Label("Eraser", systemImage: "eraser").tag(PenTypes.Erase.rawValue)
+                        Label("Red", systemImage: "pencil").tag(PenTypes.Red.rawValue)
+                        Label("Green", systemImage: "pencil").tag(PenTypes.Green.rawValue)
+                        Label("Blue", systemImage: "pencil").tag(PenTypes.Blue.rawValue)
+                        Label("Cyan", systemImage: "pencil").tag(PenTypes.Cyan.rawValue)
+                        Label("Yellow", systemImage: "pencil").tag(PenTypes.Yellow.rawValue)
+                        Label("Purple", systemImage: "pencil").tag(PenTypes.Purple.rawValue)
+                    }
+                    .pickerStyle(.menu)
+                    .padding()
+                }
+                //-------------------------------------------------------
+                // drawing enabled switch
+                HStack {
+                    Toggle("Drawing enabled", isOn: $drawingEnabled)
+                        .padding()
+                }
+                //-------------------------------------------------------
+                // show 3d crosshair switch
+                HStack {
+                    Toggle("3D crosshair", isOn: $show3dCrosshair)
+                        .padding()
+                }
+                //-------------------------------------------------------
+                // 2d crosshair switch
+                HStack {
+                    Toggle("2D crosshair", isOn: $show2dCrosshair)
+                        .padding()
+                }
+                //-------------------------------------------------------
+                // filled pen switch
+                HStack {
+                    Toggle("Auto fill pen", isOn: $isFilled)
+                        .padding()
+                }
+                //-------------------------------------------------------
+                // Corner labels switch
+                HStack {
+                    Toggle("Corner text", isOn: $cornerText)
+                        .padding()
+                }
+                //-------------------------------------------------------
+                // orientation cube switch
+                HStack {
+                    Toggle("Orientation cube", isOn: $orientationCube)
+                        .padding()
+                }
+                //-------------------------------------------------------
+                // radiological switch
+                HStack {
+                    Toggle("Radiological convention", isOn: $radiological)
+                        .padding()
+                }
+
+                Spacer() // push content to top to the entire sheet layout is from top to bottom (default is centered)
+            }
+            // allow both medium (half height) and large (full height) sheets
+            // iphone: sheets can be medium or large
+            // ipad: detents are ignored. Sheets can only be large
+            // macOS: sheets are more like modal views (rectangles) centered in the app window
+            .presentationDetents([.medium, .large])
+            .presentationContentInteraction(.scrolls)
+        } // Vstack in sheet
+    }
+
+    @ViewBuilder
+    private var volumesSheetContent: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                AccessibilityMarkerView(identifier: "niivue.volumesSheet")
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+
+                if let message = volumesSheetStatusMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                        .padding(.top, 8)
+                        .accessibilityIdentifier("niivue.volumesStatus")
+                }
+
+                List {
+                    if webViewManager.volumes.isEmpty {
+                        Text("No volumes loaded")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(webViewManager.volumes.enumerated()), id: \.element.id) { index, volume in
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(volume.name)
+                                    .font(.headline)
+                                    .lineLimit(2)
+
+                                HStack {
+                                    Text("Colormap")
+                                    Spacer()
+                                    Menu {
+                                        ForEach(availableVolumeColormaps, id: \.self) { colormap in
+                                            Button(colormap) {
+                                                setVolumeColormap(colormap, volumeIndex: index, volumeID: volume.id)
+                                            }
+                                        }
+                                    } label: {
+                                        Text(displayedColormap(for: volume.id))
+                                            .lineLimit(1)
+                                    }
+                                    .accessibilityIdentifier("niivue.volume.colormap.\(index)")
+                                }
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        Text("Opacity")
+                                        Spacer()
+                                        Text(String(format: "%.2f", volumeOpacityByID[volume.id] ?? 1.0))
+                                            .font(.system(.caption, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Slider(value: opacityBinding(volumeID: volume.id, volumeIndex: index), in: 0...1)
+                                        .accessibilityIdentifier("niivue.volume.opacity.\(index)")
+                                }
+
+                                if volume.nFrame4D > 1 {
+                                    let binding = frame4DBinding(
+                                        volumeID: volume.id,
+                                        volumeIndex: index,
+                                        maxFrame: volume.nFrame4D - 1
+                                    )
+                                    Stepper(
+                                        "Frame \(binding.wrappedValue)",
+                                        value: binding,
+                                        in: 0...(volume.nFrame4D - 1)
+                                    )
+                                    .accessibilityIdentifier("niivue.volume.frame4d.\(index)")
+                                }
+                            }
+                            .padding(.vertical, 8)
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+            }
+            .navigationTitle("Volumes")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { volumesSheetPresented = false }
+                }
+            }
+            .task {
+                await loadVolumeColormapsIfNeeded()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var segmentationSheetContent: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                AccessibilityMarkerView(identifier: "niivue.segmentationSheet")
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+                Form {
+                    Section {
+                        Button("Import Segmentation Assets") {
+                            segmentationAssetsPickerPresented = true
+                        }
+                        .accessibilityIdentifier("niivue.importSegmentationAssets")
+                        .disabled(segmentationImportInProgress)
+
+                        Button("Import DICOM Series") {
+                            dicomPickerPresented = true
+                        }
+                        .accessibilityIdentifier("niivue.importDicom")
+                        .disabled(dicomImportInProgress)
+
+                        if dicomImportInProgress {
+                            ProgressView("Importing DICOM...")
+                                .accessibilityIdentifier("niivue.dicomImportProgress")
+                        }
+
+                        if let message = dicomImportStatusMessage {
+                            Text(message)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                                .accessibilityIdentifier("niivue.dicomImportStatus")
+                        }
+
+                        if segmentationImportInProgress {
+                            ProgressView()
+                                .accessibilityIdentifier("niivue.segmentationImportProgress")
+                        }
+
+                        if let message = segmentationImportStatusMessage {
+                            Text(message)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                                .accessibilityIdentifier("niivue.segmentationImportStatus")
+                        }
+                    } header: {
+                        Text("Assets")
+                    }
+
+                    Section {
+                        Button("Undo") {
+                            drawUndo()
+                        }
+                        .accessibilityIdentifier("niivue.segmentation.undo")
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Draw opacity")
+                                Spacer()
+                                Text(String(format: "%.2f", drawOpacity))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Slider(value: $drawOpacity, in: 0...1)
+                                .accessibilityIdentifier("niivue.segmentation.drawOpacity")
+                                .onChange(of: drawOpacity) { newValue in setDrawOpacity(newValue) }
+                        }
+
+                        HStack {
+                            Text("Draw colormap")
+                            Spacer()
+                            Menu {
+                                ForEach(availableVolumeColormaps.isEmpty ? ["gray"] : availableVolumeColormaps, id: \.self) { colormap in
+                                    Button(colormap) {
+                                        drawColormap = colormap
+                                        setDrawColormap(colormap)
+                                    }
+                                }
+                            } label: {
+                                Text(drawColormap)
+                                    .lineLimit(1)
+                            }
+                            .accessibilityIdentifier("niivue.segmentation.drawColormap")
+                        }
+
+                        Toggle("Click-to-segment", isOn: $clickToSegmentEnabled)
+                            .accessibilityIdentifier("niivue.segmentation.clickToSegment")
+                            .onChange(of: clickToSegmentEnabled) { newValue in
+                                setClickToSegmentEnabled(newValue)
+                            }
+
+                        if let message = segmentationToolStatusMessage {
+                            Text(message)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                                .accessibilityIdentifier("niivue.segmentationToolStatus")
+                        }
+                    } header: {
+                        Text("Tools")
+                    }
+                }
+            }
+            .navigationTitle("Segmentation")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { segmentationSheetPresented = false }
+                }
+            }
+            .task {
+                await loadVolumeColormapsIfNeeded()
+                if availableVolumeColormaps.contains(drawColormap) == false {
+                    drawColormap = availableVolumeColormaps.first ?? drawColormap
+                }
+            }
+        }
+        .sheet(isPresented: $segmentationAssetsPickerPresented) {
+            DocumentPickerMultiple(presented: $segmentationAssetsPickerPresented) { urls in
+                importSegmentationAssets(from: urls)
+            }
+        }
+        .sheet(isPresented: $dicomPickerPresented) {
+            DocumentPickerMultiple(presented: $dicomPickerPresented) { urls in
+                importDicomSeries(from: urls)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var ctPresetSheetContent: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                AccessibilityMarkerView(identifier: "niivue.ctPresetSheet")
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+
+                if let message = ctPresetStatusMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .accessibilityIdentifier("niivue.ctPresetStatus")
+                }
+
+                Form {
+                    if let analysis = webViewManager.lastCTPresetAnalysis {
+                        Section {
+                            HStack {
+                                Text("Phase")
+                                Spacer()
+                                Text(analysis.phase)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityIdentifier("niivue.ctPresetAnalysis.phase")
+                            }
+                            HStack {
+                                Text("Confidence")
+                                Spacer()
+                                Text(String(format: "%.2f", analysis.confidence))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                            HStack {
+                                Text("Window")
+                                Spacer()
+                                Text(String(format: "%.0f…%.0f HU", analysis.calMin, analysis.calMax))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                        } header: {
+                            Text("Last Analysis")
+                        }
+                    }
+
+                    Section {
+                        Toggle("Auto-apply adaptive preset", isOn: $autoApplyCTPreset)
+                            .accessibilityIdentifier("niivue.ctPresetAutoApply")
+                            .onChange(of: autoApplyCTPreset) { newValue in
+                                syncAutoApplyCTPresetToJS(newValue)
+                                if newValue {
+                                    applyAdaptiveCTPresetNowIfPossible()
+                                }
+                            }
+                    } header: {
+                        Text("Automatic Detection")
+                    } footer: {
+                        Text("Automatically applies the adaptive CT preset when new volumes finish loading.")
+                            .font(.caption)
+                    }
+
+                    Section {
+                        Picker("Preset", selection: $selectedCTPreset) {
+                            ForEach(availableCTPresets.isEmpty ? Self.fallbackCTUrinaryPresets : availableCTPresets, id: \.self) { preset in
+                                Text(displayNameForCTPreset(preset)).tag(preset)
+                            }
+                        }
+                        .accessibilityIdentifier("niivue.ctPresetPicker")
+                        .onChange(of: selectedCTPreset) { _ in
+                            applySelectedCTPresetNow()
+                        }
+                    } header: {
+                        Text("Preset Selection")
+                    }
+
+                    Section {
+                        Button("Apply Preset Now") {
+                            applySelectedCTPresetNow()
+                        }
+                        .accessibilityIdentifier("niivue.ctPresetApply")
+                        .disabled(webViewManager.volumes.isEmpty)
+                    } header: {
+                        Text("Manual Control")
+                    }
+                }
+            }
+            .navigationTitle("CT Presets")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { ctPresetSheetPresented = false }
+                }
+            }
+            .task(id: webViewManager.isReady) {
+                await loadCTUrinaryPresetsIfPossible()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sessionsSheetContent: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                AccessibilityMarkerView(identifier: "niivue.sessionsSheet")
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+
+                Form {
+                    Section {
+                        HStack {
+                            Text("Saved sessions")
+                            Spacer()
+                            Text("\(sessionIDs.count)")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("niivue.sessionCount")
+                        }
+
+                        Button("Save Session") {
+                            saveSession()
+                        }
+                        .accessibilityIdentifier("niivue.saveSession")
+                        .disabled(sessionsInProgress || !webViewManager.isReady)
+
+                        if sessionsInProgress {
+                            ProgressView()
+                                .accessibilityIdentifier("niivue.sessionsProgress")
+                        }
+
+                        if let message = sessionsStatusMessage {
+                            Text(message)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                                .accessibilityIdentifier("niivue.sessionsStatus")
+                        }
+                    } header: {
+                        Text("Actions")
+                    }
+
+                    Section {
+                        if sessionIDs.isEmpty {
+                            Text("No sessions saved")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(sessionIDs, id: \.self) { id in
+                                HStack {
+                                    Text(id)
+                                        .font(.system(.caption, design: .monospaced))
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.6)
+                                    Spacer()
+                                    Button("Apply") {
+                                        applySession(id: id)
+                                    }
+                                    .disabled(sessionsInProgress)
+                                }
+                                .swipeActions {
+                                    Button(role: .destructive) {
+                                        deleteSession(id: id)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Recents")
+                    }
+                }
+            }
+            .navigationTitle("Sessions")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { sessionsSheetPresented = false }
+                }
+            }
+            .task {
+                resetSessionsDirectoryForUITestsIfNeeded()
+                refreshSessionsList()
+            }
+        }
+    }
+
+    private var toolbarBar: some View {
+        AnyView(
             HStack {
                 if drawingEnabled {
                     shareButton
@@ -1485,8 +2351,7 @@ struct ContentView: View {
                 Button(action: {
                     drawingEnabled = false
                     documentPickerPresented = true
-                })
-                {
+                }) {
                     Image(systemName: "plus")
                         .padding()
                         .foregroundColor(.white)
@@ -1543,6 +2408,7 @@ struct ContentView: View {
                         }
                     }
                 } // add image (plus) sheet end
+
                 // -------------------------------------------------------------
                 // 2D tool mode: Window/Level (contrast/brightness) vs Stack Scroll
                 Button(action: {
@@ -1581,149 +2447,19 @@ struct ContentView: View {
                 }
                 .accessibilityIdentifier("niivue.tool.windowLevel")
                 .disabled(!(sliceType == SliceTypes.Axial.rawValue || sliceType == SliceTypes.Coronal.rawValue || sliceType == SliceTypes.Sagittal.rawValue))
+
                 // -------------------------------------------------------------
                 // adjust settings button
                 Button(action: {
                     settingsSheetPresented = true
-                })
-                {
+                }) {
                     Image(systemName: "slider.horizontal.3")
                         .padding()
                         .foregroundColor(.white)
                 }
                 .accessibilityIdentifier("niivue.settings")
                 .sheet(isPresented: $settingsSheetPresented) {
-                    ScrollView {
-
-                        VStack(alignment: .leading) {
-                            //-----------------------------------------------------
-                            // dismiss button in top right corner of sheet
-                            HStack {
-                                Spacer() // push button to the right (ios guidelines for sheets)
-                                Button("Dismiss") {
-                                    settingsSheetPresented.toggle()
-                                }
-                                .padding()
-                            }
-                            .padding()
-                            //-----------------------------------------------------
-                            // picker for the slice type
-                            HStack {
-                                Text("View type")
-                                    .padding()
-                                Spacer()
-                                Picker("View mode", selection: $sliceType) {
-                                    Text("Axial").tag(SliceTypes.Axial.rawValue)
-                                    Text("Coronal").tag(SliceTypes.Coronal.rawValue)
-                                    Text("Sagittal").tag(SliceTypes.Sagittal.rawValue)
-                                    Text("Multiplanar").tag(SliceTypes.Multiplanar.rawValue)
-                                    Text("Render").tag(SliceTypes.Render.rawValue)
-                                }
-                                .pickerStyle(.menu)
-                                .accessibilityIdentifier("niivue.settings.viewType")
-                                .padding()
-                            }
-                            //------------------------------------------------------
-                            // picker for the layout type of multiplanar
-                            HStack {
-                                Text("Multiplanar layout ")
-                                    .padding()
-                                Spacer()
-                                Picker("layout mode", selection: $layout) {
-                                    Text("Auto").tag(LayoutTypes.Auto.rawValue)
-                                    Text("Column").tag(LayoutTypes.Column.rawValue)
-                                    Text("Grid").tag(LayoutTypes.Grid.rawValue)
-                                    Text("Row").tag(LayoutTypes.Row.rawValue)
-                                }
-                                .pickerStyle(.menu)
-                                .padding()
-                            }
-                            //------------------------------------------------------
-                            // picker for the drag type
-                            HStack {
-                                Text(dragLabel)
-                                    .padding()
-                                Spacer()
-                                Picker("Drag mode", selection: $dragType) {
-                                    Text("None").tag(DragTypes.None.rawValue)
-                                    Text("Contrast").tag(DragTypes.Contrast.rawValue)
-                                    Text("Measure").tag(DragTypes.Measure.rawValue)
-                                    Text("Pan").tag(DragTypes.Pan.rawValue)
-                                    Text("Slicer3D").tag(DragTypes.Slicer3D.rawValue)
-                                }
-                                .pickerStyle(.menu)
-                                .padding()
-                            }
-                            //------------------------------------------------------
-                            // picker for the pen type
-                            HStack {
-                                Text("Pen type")
-                                    .padding()
-                                Spacer()
-                                Picker("Pen type", selection: $penValue) {
-                                    Label("Eraser", systemImage: "eraser").tag(PenTypes.Erase.rawValue)
-                                    Label("Red", systemImage: "pencil").tag(PenTypes.Red.rawValue)
-                                    Label("Green", systemImage: "pencil").tag(PenTypes.Green.rawValue)
-                                    Label("Blue", systemImage: "pencil").tag(PenTypes.Blue.rawValue)
-                                    Label("Cyan", systemImage: "pencil").tag(PenTypes.Cyan.rawValue)
-                                    Label("Yellow", systemImage: "pencil").tag(PenTypes.Yellow.rawValue)
-                                    Label("Purple", systemImage: "pencil").tag(PenTypes.Purple.rawValue)
-                                }
-                                .pickerStyle(.menu)
-                                .padding()
-                            }
-                            //-------------------------------------------------------
-                            // drawing enabled switch
-                            HStack {
-                                Toggle("Drawing enabled", isOn: $drawingEnabled)
-                                    .padding()
-                            }
-                            //-------------------------------------------------------
-                            // show 3d crosshair switch
-                            HStack {
-                                Toggle("3D crosshair", isOn: $show3dCrosshair)
-                                    .padding()
-                            }
-                            //-------------------------------------------------------
-                            // 2d crosshair switch
-                            HStack {
-                                Toggle("2D crosshair", isOn: $show2dCrosshair)
-                                    .padding()
-                            }
-                            //-------------------------------------------------------
-                            // filled pen switch
-                            HStack {
-                                Toggle("Auto fill pen", isOn: $isFilled)
-                                    .padding()
-                            }
-                            //-------------------------------------------------------
-                            // Corner labels switch
-                            HStack {
-                                Toggle("Corner text", isOn: $cornerText)
-                                    .padding()
-                            }
-                            //-------------------------------------------------------
-                            // orientation cube switch
-                            HStack {
-                                Toggle("Orientation cube", isOn: $orientationCube)
-                                    .padding()
-                            }
-                            //-------------------------------------------------------
-                            // radiological switch
-                            HStack {
-                                Toggle("Radiological convention", isOn: $radiological)
-                                    .padding()
-                            }
-
-                            Spacer() // push content to top to the entire sheet layout is from top to bottom (default is centered)
-                        }
-                        // allow both medium (half height) and large (full height) sheets
-                        // iphone: sheets can be medium or large
-                        // ipad: detents are ignored. Sheets can only be large
-                        // macOS: sheets are more like modal views (rectangles) centered in the app window
-                        .presentationDetents([.medium, .large])
-                        .presentationContentInteraction(.scrolls)
-                    } // Vstack in sheet
+                    settingsSheetContent
                 }
 
                 // Phase 2 UI: Dedicated Volumes sheet
@@ -1736,92 +2472,7 @@ struct ContentView: View {
                 }
                 .accessibilityIdentifier("niivue.volumes")
                 .sheet(isPresented: $volumesSheetPresented) {
-                    NavigationStack {
-                        VStack(spacing: 0) {
-                            AccessibilityMarkerView(identifier: "niivue.volumesSheet")
-                                .frame(width: 1, height: 1)
-                                .opacity(0.01)
-
-                            if let message = volumesSheetStatusMessage {
-                                Text(message)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal)
-                                    .padding(.top, 8)
-                                    .accessibilityIdentifier("niivue.volumesStatus")
-                            }
-
-                            List {
-                                if webViewManager.volumes.isEmpty {
-                                    Text("No volumes loaded")
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    ForEach(Array(webViewManager.volumes.enumerated()), id: \.element.id) { index, volume in
-                                        VStack(alignment: .leading, spacing: 12) {
-                                            Text(volume.name)
-                                                .font(.headline)
-                                                .lineLimit(2)
-
-                                            HStack {
-                                                Text("Colormap")
-                                                Spacer()
-                                                Menu {
-                                                    ForEach(availableVolumeColormaps, id: \.self) { colormap in
-                                                        Button(colormap) {
-                                                            setVolumeColormap(colormap, volumeIndex: index, volumeID: volume.id)
-                                                        }
-                                                    }
-                                                } label: {
-                                                    Text(displayedColormap(for: volume.id))
-                                                        .lineLimit(1)
-                                                }
-                                                .accessibilityIdentifier("niivue.volume.colormap.\(index)")
-                                            }
-
-                                            VStack(alignment: .leading, spacing: 6) {
-                                                HStack {
-                                                    Text("Opacity")
-                                                    Spacer()
-                                                    Text(String(format: "%.2f", volumeOpacityByID[volume.id] ?? 1.0))
-                                                        .font(.system(.caption, design: .monospaced))
-                                                        .foregroundStyle(.secondary)
-                                                }
-
-                                                Slider(value: opacityBinding(volumeID: volume.id, volumeIndex: index), in: 0...1)
-                                                    .accessibilityIdentifier("niivue.volume.opacity.\(index)")
-                                            }
-
-                                            if volume.nFrame4D > 1 {
-                                                let binding = frame4DBinding(
-                                                    volumeID: volume.id,
-                                                    volumeIndex: index,
-                                                    maxFrame: volume.nFrame4D - 1
-                                                )
-                                                Stepper(
-                                                    "Frame \(binding.wrappedValue)",
-                                                    value: binding,
-                                                    in: 0...(volume.nFrame4D - 1)
-                                                )
-                                                .accessibilityIdentifier("niivue.volume.frame4d.\(index)")
-                                            }
-                                        }
-                                        .padding(.vertical, 8)
-                                    }
-                                }
-                            }
-                            .listStyle(.insetGrouped)
-                        }
-                        .navigationTitle("Volumes")
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") { volumesSheetPresented = false }
-                            }
-                        }
-                        .task {
-                            await loadVolumeColormapsIfNeeded()
-                        }
-                    }
+                    volumesSheetContent
                 }
 
                 // Phase 2 UI: Dedicated Segmentation sheet
@@ -1834,131 +2485,7 @@ struct ContentView: View {
                 }
                 .accessibilityIdentifier("niivue.segmentation")
                 .sheet(isPresented: $segmentationSheetPresented) {
-                    NavigationStack {
-                        VStack(spacing: 0) {
-                            AccessibilityMarkerView(identifier: "niivue.segmentationSheet")
-                                .frame(width: 1, height: 1)
-                                .opacity(0.01)
-                            Form {
-                                Section {
-                                    Button("Import Segmentation Assets") {
-                                        segmentationAssetsPickerPresented = true
-                                    }
-                                    .accessibilityIdentifier("niivue.importSegmentationAssets")
-                                    .disabled(segmentationImportInProgress)
-
-                                    Button("Import DICOM Series") {
-                                        dicomPickerPresented = true
-                                    }
-                                    .accessibilityIdentifier("niivue.importDicom")
-                                    .disabled(dicomImportInProgress)
-
-                                    if dicomImportInProgress {
-                                        ProgressView("Importing DICOM...")
-                                            .accessibilityIdentifier("niivue.dicomImportProgress")
-                                    }
-
-                                    if let message = dicomImportStatusMessage {
-                                        Text(message)
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                            .multilineTextAlignment(.leading)
-                                            .accessibilityIdentifier("niivue.dicomImportStatus")
-                                    }
-
-                                    if segmentationImportInProgress {
-                                        ProgressView()
-                                            .accessibilityIdentifier("niivue.segmentationImportProgress")
-                                    }
-
-                                    if let message = segmentationImportStatusMessage {
-                                        Text(message)
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                            .multilineTextAlignment(.leading)
-                                            .accessibilityIdentifier("niivue.segmentationImportStatus")
-                                    }
-                                } header: {
-                                    Text("Assets")
-                                }
-
-                                Section {
-                                    Button("Undo") {
-                                        drawUndo()
-                                    }
-                                    .accessibilityIdentifier("niivue.segmentation.undo")
-
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        HStack {
-                                            Text("Draw opacity")
-                                            Spacer()
-                                            Text(String(format: "%.2f", drawOpacity))
-                                                .font(.system(.caption, design: .monospaced))
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Slider(value: $drawOpacity, in: 0...1)
-                                            .accessibilityIdentifier("niivue.segmentation.drawOpacity")
-                                            .onChange(of: drawOpacity) { newValue in setDrawOpacity(newValue) }
-                                    }
-
-                                    HStack {
-                                        Text("Draw colormap")
-                                        Spacer()
-                                        Menu {
-                                            ForEach(availableVolumeColormaps.isEmpty ? ["gray"] : availableVolumeColormaps, id: \.self) { colormap in
-                                                Button(colormap) {
-                                                    drawColormap = colormap
-                                                    setDrawColormap(colormap)
-                                                }
-                                            }
-                                        } label: {
-                                            Text(drawColormap)
-                                                .lineLimit(1)
-                                        }
-                                        .accessibilityIdentifier("niivue.segmentation.drawColormap")
-                                    }
-
-                                    Toggle("Click-to-segment", isOn: $clickToSegmentEnabled)
-                                        .accessibilityIdentifier("niivue.segmentation.clickToSegment")
-                                        .onChange(of: clickToSegmentEnabled) { newValue in
-                                            setClickToSegmentEnabled(newValue)
-                                        }
-
-                                    if let message = segmentationToolStatusMessage {
-                                        Text(message)
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                            .multilineTextAlignment(.leading)
-                                            .accessibilityIdentifier("niivue.segmentationToolStatus")
-                                    }
-                                } header: {
-                                    Text("Tools")
-                                }
-                            }
-                        }
-                        .navigationTitle("Segmentation")
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") { segmentationSheetPresented = false }
-                            }
-                        }
-                        .task {
-                            await loadVolumeColormapsIfNeeded()
-                            if availableVolumeColormaps.contains(drawColormap) == false {
-                                drawColormap = availableVolumeColormaps.first ?? drawColormap
-                            }
-                        }
-                    }
-                    .sheet(isPresented: $segmentationAssetsPickerPresented) {
-                        DocumentPickerMultiple(presented: $segmentationAssetsPickerPresented) { urls in
-                            importSegmentationAssets(from: urls)
-                        }
-                    }
-                    .sheet(isPresented: $dicomPickerPresented) {
-                        DocumentPickerMultiple(presented: $dicomPickerPresented) { urls in
-                            importDicomSeries(from: urls)
-                        }
-                    }
+                    segmentationSheetContent
                 }
 
                 // CT Adaptive Engine UI: Dedicated CT Presets sheet
@@ -1971,101 +2498,7 @@ struct ContentView: View {
                 }
                 .accessibilityIdentifier("niivue.ctPresets")
                 .sheet(isPresented: $ctPresetSheetPresented) {
-                    NavigationStack {
-                        VStack(spacing: 0) {
-                            AccessibilityMarkerView(identifier: "niivue.ctPresetSheet")
-                                .frame(width: 1, height: 1)
-                                .opacity(0.01)
-
-                            if let message = ctPresetStatusMessage {
-                                Text(message)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.leading)
-                                    .accessibilityIdentifier("niivue.ctPresetStatus")
-                            }
-
-                            Form {
-                                if let analysis = webViewManager.lastCTPresetAnalysis {
-                                    Section {
-                                        HStack {
-                                            Text("Phase")
-                                            Spacer()
-                                            Text(analysis.phase)
-                                                .font(.system(.caption, design: .monospaced))
-                                                .foregroundStyle(.secondary)
-                                                .accessibilityIdentifier("niivue.ctPresetAnalysis.phase")
-                                        }
-                                        HStack {
-                                            Text("Confidence")
-                                            Spacer()
-                                            Text(String(format: "%.2f", analysis.confidence))
-                                                .font(.system(.caption, design: .monospaced))
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        HStack {
-                                            Text("Window")
-                                            Spacer()
-                                            Text(String(format: "%.0f…%.0f HU", analysis.calMin, analysis.calMax))
-                                                .font(.system(.caption, design: .monospaced))
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    } header: {
-                                        Text("Last Analysis")
-                                    }
-                                }
-
-                                Section {
-                                    Toggle("Auto-apply adaptive preset", isOn: $autoApplyCTPreset)
-                                        .accessibilityIdentifier("niivue.ctPresetAutoApply")
-                                        .onChange(of: autoApplyCTPreset) { newValue in
-                                            syncAutoApplyCTPresetToJS(newValue)
-                                            if newValue {
-                                                applyAdaptiveCTPresetNowIfPossible()
-                                            }
-                                        }
-                                } header: {
-                                    Text("Automatic Detection")
-                                } footer: {
-                                    Text("Automatically applies the adaptive CT preset when new volumes finish loading.")
-                                        .font(.caption)
-                                }
-
-                                Section {
-                                    Picker("Preset", selection: $selectedCTPreset) {
-                                        ForEach(availableCTPresets.isEmpty ? Self.fallbackCTUrinaryPresets : availableCTPresets, id: \.self) { preset in
-                                            Text(displayNameForCTPreset(preset)).tag(preset)
-                                        }
-                                    }
-                                    .accessibilityIdentifier("niivue.ctPresetPicker")
-                                    .onChange(of: selectedCTPreset) { _ in
-                                        applySelectedCTPresetNow()
-                                    }
-                                } header: {
-                                    Text("Preset Selection")
-                                }
-
-                                Section {
-                                    Button("Apply Preset Now") {
-                                        applySelectedCTPresetNow()
-                                    }
-                                    .accessibilityIdentifier("niivue.ctPresetApply")
-                                    .disabled(webViewManager.volumes.isEmpty)
-                                } header: {
-                                    Text("Manual Control")
-                                }
-                            }
-                        }
-                        .navigationTitle("CT Presets")
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") { ctPresetSheetPresented = false }
-                            }
-                        }
-                        .task(id: webViewManager.isReady) {
-                            await loadCTUrinaryPresetsIfPossible()
-                        }
-                    }
+                    ctPresetSheetContent
                 }
 
                 // Phase 2 UI: Dedicated Sessions sheet
@@ -2078,145 +2511,64 @@ struct ContentView: View {
                 }
                 .accessibilityIdentifier("niivue.sessions")
                 .sheet(isPresented: $sessionsSheetPresented) {
-                    NavigationStack {
-                        VStack(spacing: 0) {
-                            AccessibilityMarkerView(identifier: "niivue.sessionsSheet")
-                                .frame(width: 1, height: 1)
-                                .opacity(0.01)
-
-                            Form {
-                                Section {
-                                    HStack {
-                                        Text("Saved sessions")
-                                        Spacer()
-                                        Text("\(sessionIDs.count)")
-                                            .font(.system(.caption, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                            .accessibilityIdentifier("niivue.sessionCount")
-                                    }
-
-                                    Button("Save Session") {
-                                        saveSession()
-                                    }
-                                    .accessibilityIdentifier("niivue.saveSession")
-                                    .disabled(sessionsInProgress || !webViewManager.isReady)
-
-                                    if sessionsInProgress {
-                                        ProgressView()
-                                            .accessibilityIdentifier("niivue.sessionsProgress")
-                                    }
-
-                                    if let message = sessionsStatusMessage {
-                                        Text(message)
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                            .multilineTextAlignment(.leading)
-                                            .accessibilityIdentifier("niivue.sessionsStatus")
-                                    }
-                                } header: {
-                                    Text("Actions")
-                                }
-
-                                Section {
-                                    if sessionIDs.isEmpty {
-                                        Text("No sessions saved")
-                                            .foregroundStyle(.secondary)
-                                    } else {
-                                        ForEach(sessionIDs, id: \.self) { id in
-                                            HStack {
-                                                Text(id)
-                                                    .font(.system(.caption, design: .monospaced))
-                                                    .lineLimit(1)
-                                                    .minimumScaleFactor(0.6)
-                                                Spacer()
-                                                Button("Apply") {
-                                                    applySession(id: id)
-                                                }
-                                                .disabled(sessionsInProgress)
-                                            }
-                                            .swipeActions {
-                                                Button(role: .destructive) {
-                                                    deleteSession(id: id)
-                                                } label: {
-                                                    Label("Delete", systemImage: "trash")
-                                                }
-                                            }
-                                        }
-                                    }
-                                } header: {
-                                    Text("Recents")
-                                }
-                            }
-                        }
-                        .navigationTitle("Sessions")
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") { sessionsSheetPresented = false }
-                            }
-                        }
-                        .task {
-                            resetSessionsDirectoryForUITestsIfNeeded()
-                            refreshSessionsList()
-                        }
-                    }
+                    sessionsSheetContent
                 }
             } // HStack
             .padding(.horizontal) // Adds some padding on the left and right
             .background(Color.black)
-            // -------------------------------------------------------------
-            // show the drawing toolbar if drawing enabled and only showing axial, sagittal, or coronal slices
-            if (drawingEnabled && sliceType != SliceTypes.Multiplanar.rawValue && sliceType != SliceTypes.Render.rawValue) {
-                HStack {
-                    Button(action: {
-                        print("rotate slice type")
-                        rotateSliceType()
-                    })
-                    {
-                        let font = Font
-                            .system(size: 18)
-                            .monospaced()
-                        Text(sliceTypeText).bold().font(font)
-                    }
-                    .padding()
-                    Spacer()
-                    //-------------------------------------------------
-                    Text(decrementText)
-                        .foregroundStyle(.white)
-                    Button(action: {
-                        print("decrement slice")
-                        decrementSlice()
-                    })
-                    {
-                        Image(systemName: "minus.rectangle.fill")
-                            .padding([.bottom, .top, .trailing], 20)
-                            .foregroundColor(.white)
-                    }
-                    .buttonStyle(.borderless)
-                        .controlSize(.large)
-                    // --------------------------------------------------
-                    Text("Slice")
-                        .foregroundStyle(.white)
+        )
+    }
 
-                    //---------------------------------------------------
-                    Button(action: {
-                        print("increment slice")
-                        incrementSlice()
-                    })
-                    {
-                        Image(systemName: "plus.rectangle.fill")
-                            .padding([.bottom, .top, .leading], 20)
-                            .foregroundColor(.white)
-                    }
-                    .buttonStyle(.borderless)
-                        .controlSize(.large)
-                    Text(incrementText)
-                        .foregroundStyle(.white)
-                }
-                .padding(.horizontal) // Adds some padding on the left and right
-                .background(Color.black)
+    private var drawingToolbarBar: some View {
+        HStack {
+            Button(action: {
+                print("rotate slice type")
+                rotateSliceType()
+            }) {
+                let font = Font
+                    .system(size: 18)
+                    .monospaced()
+                Text(sliceTypeText).bold().font(font)
             }
-            // -------------------------------------------------------------
-            // show the webview with loading overlay and HUD
+            .padding()
+            Spacer()
+            //-------------------------------------------------
+            Text(decrementText)
+                .foregroundStyle(.white)
+            Button(action: {
+                print("decrement slice")
+                decrementSlice()
+            }) {
+                Image(systemName: "minus.rectangle.fill")
+                    .padding([.bottom, .top, .trailing], 20)
+                    .foregroundColor(.white)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.large)
+            // --------------------------------------------------
+            Text("Slice")
+                .foregroundStyle(.white)
+
+            //---------------------------------------------------
+            Button(action: {
+                print("increment slice")
+                incrementSlice()
+            }) {
+                Image(systemName: "plus.rectangle.fill")
+                    .padding([.bottom, .top, .leading], 20)
+                    .foregroundColor(.white)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.large)
+            Text(incrementText)
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal) // Adds some padding on the left and right
+        .background(Color.black)
+    }
+
+    private var viewerArea: some View {
+        AnyView(
             ZStack {
                 WebView(manager: webViewManager)
                     .onAppear {
@@ -2322,6 +2674,19 @@ struct ContentView: View {
                                     windowLevelDragStartWindowLevel = nil
                                     webViewManager.flushPendingGestureCommandsNow()
                                 }
+                            },
+                            onOneFingerTap: { location in
+                                guard clickToSegmentEnabled, is2DWebViewSliceType else { return }
+                                Task { @MainActor in
+                                    do {
+                                        try await webViewManager.clickToSegmentAtScreenPoint(
+                                            x: Double(location.x),
+                                            y: Double(location.y)
+                                        )
+                                    } catch {
+                                        segmentationToolStatusMessage = "Click-to-segment failed: \(error.localizedDescription)"
+                                    }
+                                }
                             }
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2379,6 +2744,14 @@ struct ContentView: View {
                                     .accessibilityIdentifier("niivue.lastError")
                                 Text(webViewManager.lastJSLogMessage ?? "")
                                     .accessibilityIdentifier("niivue.lastJSLog")
+                                Text("\(webViewManager.lastClickToSegmentApplyCount ?? 0)")
+                                    .accessibilityIdentifier("niivue.clickToSegment.applyCount")
+                                Text(String(format: "%.0f", webViewManager.lastClickToSegmentDrawSum ?? 0))
+                                    .accessibilityIdentifier("niivue.clickToSegment.drawSum")
+                                Text(String(format: "%.3f", webViewManager.lastClickToSegmentVolumeMM3 ?? 0))
+                                    .accessibilityIdentifier("niivue.clickToSegment.volumeMM3")
+                                Text(String(format: "%.3f", webViewManager.lastClickToSegmentVolumeML ?? 0))
+                                    .accessibilityIdentifier("niivue.clickToSegment.volumeML")
                                 Text(webViewManager.lastClipPlaneDepth.map { String(format: "%.3f", $0) } ?? "")
                                     .accessibilityIdentifier("niivue.clipPlaneDepth")
                             }
@@ -2393,285 +2766,67 @@ struct ContentView: View {
                 }
             }
             .padding()
+        )
+    }
+
+    @ViewBuilder
+    private var mainLayout: some View {
+        VStack {
+            toolbarBar
+
+            // -------------------------------------------------------------
+            // show the drawing toolbar if drawing enabled and only showing axial, sagittal, or coronal slices
+            if drawingEnabled && sliceType != SliceTypes.Multiplanar.rawValue && sliceType != SliceTypes.Render.rawValue {
+                drawingToolbarBar
+            }
+
+            // -------------------------------------------------------------
+            // show the webview with loading overlay and HUD
+            viewerArea
         }
+    }
+
+    var body: some View {
+        mainLayout
         // Load sample image when webview becomes ready (Task 8: event-driven, Task 12: URL-based)
         .onChange(of: webViewManager.isReady) { newValue in
-            if newValue {
-                Task {
-                    do {
-                        // Phase 2 Task 2: UI test path loads multiple volumes
-                        if isUITestLoadMultiple {
-                            print("[ContentView] Loading 2 volumes for UI test")
-                            let sample1 = (url: "niivue://app/samples/ui-test-volume-1.nii", name: "ui-test-volume-1.nii")
-                            let sample2 = (url: "niivue://app/samples/ui-test-volume-2.nii", name: "ui-test-volume-2.nii")
-                            try await webViewManager.loadVolumesFromUrls([sample1, sample2])
-                            print("[ContentView] loadVolumesFromUrls returned, volumes.count = \(webViewManager.volumes.count)")
-                        } else if let relativeDir = uiTestDicomRelativeDirectory {
-                            await MainActor.run {
-                                dicomImportInProgress = true
-                                dicomImportStatusMessage = "Loading DICOM fixture…"
-                            }
-
-                            defer {
-                                Task { @MainActor in
-                                    dicomImportInProgress = false
-                                }
-                            }
-
-                            let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                            let fixtureDir = documentsDir.appendingPathComponent(relativeDir, isDirectory: true)
-
-                            let fileURLs: [URL]
-                            do {
-                                fileURLs = try FileManager.default.contentsOfDirectory(
-                                    at: fixtureDir,
-                                    includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
-                                    options: [.skipsHiddenFiles]
-                                )
-                            } catch {
-                                await MainActor.run {
-                                    dicomImportStatusMessage = "Failed to read fixture dir: \(error.localizedDescription)"
-                                }
-                                return
-                            }
-
-                            let dicomFiles = fileURLs
-                                .filter { url in
-                                    let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
-                                    guard values?.isDirectory != true else { return false }
-                                    guard values?.isRegularFile != false else { return false }
-                                    let ext = url.pathExtension.lowercased()
-                                    return ext == "dcm" || ext == "dicom" || ext.isEmpty
-                                }
-                                .sorted { $0.lastPathComponent < $1.lastPathComponent }
-
-                            guard !dicomFiles.isEmpty else {
-                                await MainActor.run {
-                                    dicomImportStatusMessage = "Failed: no DICOM files found in fixture dir."
-                                }
-                                return
-                            }
-
-                            await MainActor.run {
-                                dicomImportStatusMessage = "Loading \(dicomFiles.count) DICOM file(s)…"
-                            }
-
-                            let seriesId = await dicomSeriesStore.register(files: dicomFiles)
-                            webViewManager.urlSchemeHandler.dicomSeriesStore = dicomSeriesStore
-
-                            let manifestURL = "niivue://app/dicom/\(seriesId)/niivue-manifest.txt"
-                            do {
-                                try await webViewManager.loadDicomSeriesFromManifestURL(manifestURL)
-                                await MainActor.run {
-                                    dicomImportStatusMessage = "Loaded \(dicomFiles.count) DICOM file(s)."
-                                }
-                            } catch {
-                                await MainActor.run {
-                                    let message = "Failed to load DICOM series: \(error.localizedDescription)"
-                                    dicomImportStatusMessage = message
-                                    webViewManager.lastErrorMessage = message
-                                }
-                            }
-                        } else {
-                            // Normal path: load single demo image
-                            let sampleURL = "niivue://app/samples/T1w_DEMO.nii.gz"
-                            let fileName = "T1w_DEMO.nii.gz"
-                            try await webViewManager.loadImageFromUrl(url: sampleURL, fileName: fileName)
-
-                            // Update UI state to show filename
-	                            await MainActor.run {
-	                                pickedDocumentURL = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples")
-	                            }
-	                        }
-
-		                        if let updated = try? await webViewManager.getIntensityWindow(volumeIndex: 0) {
-		                            await MainActor.run {
-		                                windowWidth = max(1.0, updated.windowWidth)
-		                                windowLevel = updated.windowLevel
-		                            }
-		                        }
-		                    } catch {
-		                        print("Error loading sample image: \(error)")
-
-                        // Fallback to base64 if URL-based fails (limited by maxBase64FallbackBytes)
-                        if !isUITestLoadMultiple, let url = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples") {
-                            let maxBytes = maxBase64FallbackBytes
-                            let encodedString = await Task.detached(priority: .userInitiated) {
-                                Base64FileEncoder.encodeFileToBase64(url: url, maxBytes: maxBytes)
-                            }.value
-
-                            await MainActor.run {
-                                pickedDocumentURL = url
-                                if let encodedString {
-                                    base64EncodedString = encodedString
-                                } else {
-                                    webViewManager.lastErrorMessage = "Failed to load bundled sample (base64 fallback skipped)."
-                                }
-                            }
-                        }
-
-                        if isUITestLoadMultiple {
-                            await MainActor.run {
-                                webViewManager.lastErrorMessage = "UI test volume load failed: \(error.localizedDescription)"
-                            }
-                        }
-                    }
-                }
-            }
+            handleWebViewReadyChanged(isReady: newValue)
         }
         .onChange(of: base64EncodedString) { newValue in
-            // Call a function or handle the change
-            print("Base64 string updated")
-            if let safeBase64 = newValue, let fileName = pickedDocumentURL?.lastPathComponent {
-                Task {
-                    do {
-                        try await webViewManager.loadBase64Image(base64: safeBase64, fileName: fileName)
-                    } catch {
-                        print("Error loading base64 image: \(error)")
-                    }
-                }
-            }
+            handleBase64EncodedStringChanged(newValue)
         }
         .onChange(of: sliceType) { newValue in
-            print("sliceType updated to: \(newValue)")
-            if !(newValue == SliceTypes.Axial.rawValue || newValue == SliceTypes.Coronal.rawValue || newValue == SliceTypes.Sagittal.rawValue) {
-                toolMode = .scroll
-                windowLevelIsDragging = false
-                windowLevelDragStartWindowWidth = nil
-                windowLevelDragStartWindowLevel = nil
-            }
-            Task {
-                do {
-                    try await webViewManager.setSliceType(sliceType: newValue)
-
-                    // In 2D slice views, the native gesture system owns dragging. Disable Niivue drag mode to
-                    // prevent the underlying web content from competing with native gestures.
-                    if newValue == SliceTypes.Axial.rawValue || newValue == SliceTypes.Coronal.rawValue || newValue == SliceTypes.Sagittal.rawValue {
-                        try await webViewManager.setDragMode(dragMode: DragTypes.None.rawValue)
-                    } else {
-                        try await webViewManager.setDragMode(dragMode: dragType)
-                    }
-                } catch {
-                    print("Error setting slice type: \(error)")
-                }
-            }
-            if (newValue == SliceTypes.Axial.rawValue) {
-                incrementText = "S" // superior
-                decrementText = "I" // inferior
-                sliceTypeText = "A"
-            } else if (newValue == SliceTypes.Coronal.rawValue) {
-                incrementText = "A" // anterior
-                decrementText = "P" // posterior
-                sliceTypeText = "C"
-            } else if (newValue == SliceTypes.Sagittal.rawValue) {
-                incrementText = "R" // right
-                decrementText = "L" // left
-                sliceTypeText = "S"
-            }
+            handleSliceTypeChanged(newValue)
         }
         .onChange(of: layout) { newValue in
-            print("layout updated to: \(newValue)")
-            Task {
-                do {
-                    try await webViewManager.setLayout(layout: newValue)
-                } catch {
-                    print("Error setting layout: \(error)")
-                }
-            }
+            handleLayoutChanged(newValue)
         }
         .onChange(of: dragType) { newValue in
-            print("drag type updated to: \(newValue)")
-            guard !is2DSliceType else {
-                // 2D slice views are driven by native gestures; ignore dragMode changes here.
-                return
-            }
-            Task {
-                do {
-                    try await webViewManager.setDragMode(dragMode: newValue)
-                } catch {
-                    print("Error setting drag mode: \(error)")
-                }
-            }
+            handleDragTypeChanged(newValue)
         }
         .onChange(of: show3dCrosshair) { newValue in
-            print("show3dCrosshair updated to: \(newValue)")
-            Task {
-                do {
-                    try await webViewManager.set3dCrosshairVisible(visible: newValue)
-                } catch {
-                    print("Error setting 3D crosshair: \(error)")
-                }
-            }
+            handleShow3dCrosshairChanged(newValue)
         }
         .onChange(of: show2dCrosshair) { newValue in
-            print("show2dCrosshair updated to: \(newValue)")
-            Task {
-                do {
-                    try await webViewManager.set2dCrosshairVisible(visible: newValue)
-                } catch {
-                    print("Error setting 2D crosshair: \(error)")
-                }
-            }
+            handleShow2dCrosshairChanged(newValue)
         }
         .onChange(of: isFilled) { newValue in
-            print("isFilled updated to: \(newValue)")
-            Task {
-                do {
-                    try await webViewManager.setPenValue(penValue: penValue, isFilled: newValue, drawingEnabled: drawingEnabled)
-                } catch {
-                    print("Error setting pen value: \(error)")
-                }
-            }
+            handleIsFilledChanged(newValue)
         }
         .onChange(of: drawingEnabled) { newValue in
-            print("drawingEnabled updated to: \(newValue)")
-            Task {
-                do {
-                    try await webViewManager.setPenValue(penValue: penValue, isFilled: isFilled, drawingEnabled: newValue)
-                } catch {
-                    print("Error setting drawing enabled: \(error)")
-                }
-            }
+            handleDrawingEnabledChanged(newValue)
         }
         .onChange(of: cornerText) { newValue in
-            print("cornerText updated to: \(newValue)")
-            Task {
-                do {
-                    try await webViewManager.setCornerText(isCorners: newValue)
-                } catch {
-                    print("Error setting corner text: \(error)")
-                }
-            }
+            handleCornerTextChanged(newValue)
         }
         .onChange(of: orientationCube) { newValue in
-            print("orientationCube updated to: \(newValue)")
-            Task {
-                do {
-                    try await webViewManager.setOrientationCube(isOrientationCube: newValue)
-                } catch {
-                    print("Error setting orientation cube: \(error)")
-                }
-            }
+            handleOrientationCubeChanged(newValue)
         }
         .onChange(of: radiological) { newValue in
-            print("radiological updated to: \(newValue)")
-            Task {
-                do {
-                    try await webViewManager.setRadiological(isRadiological: newValue)
-                } catch {
-                    print("Error setting radiological: \(error)")
-                }
-            }
+            handleRadiologicalChanged(newValue)
         }
         .onChange(of: penValue) { newValue in
-            print("penValue updated to: \(newValue)")
-            Task {
-                do {
-                    try await webViewManager.setPenValue(penValue: newValue, isFilled: isFilled, drawingEnabled: drawingEnabled)
-                } catch {
-                    print("Error setting pen value: \(error)")
-                }
-            }
+            handlePenValueChanged(newValue)
         }
         .background(Color.black)
     }

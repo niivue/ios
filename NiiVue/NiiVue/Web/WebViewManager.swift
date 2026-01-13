@@ -38,6 +38,11 @@ final class WebViewManager: NSObject, ObservableObject {
     /// Used to reload volumes on session restore.
     @Published var volumeSources: [SessionSnapshotV1.VolumeSource] = []
 
+    // MARK: - Volume Visibility (Opacity Cache)
+
+    private var lastKnownOpacityByVolumeID: [String: Double] = [:]
+    private var hiddenOpacityBackupByVolumeID: [String: Double] = [:]
+
     /// Last location string from Niivue onLocationChange (Phase 2 Task 1: HUD)
     @Published var lastLocationString: String?
 
@@ -62,6 +67,24 @@ final class WebViewManager: NSObject, ObservableObject {
     /// UI test instrumentation: counts stack-scroll pan updates received by native gesture layer.
     @Published var stackScrollDebugEventCount: Int = 0
 
+    /// UI test instrumentation: click-to-segment apply counter (JS → Swift).
+    @Published var lastClickToSegmentApplyCount: Int?
+
+    /// UI test instrumentation: sum of drawing bitmap values after click-to-segment (JS → Swift).
+    @Published var lastClickToSegmentDrawSum: Double?
+
+    /// UI test instrumentation: volume of last click-to-segment region in mm^3 (JS → Swift).
+    @Published var lastClickToSegmentVolumeMM3: Double?
+
+    /// UI test instrumentation: volume of last click-to-segment region in mL (JS → Swift).
+    @Published var lastClickToSegmentVolumeML: Double?
+
+    /// UI test instrumentation: last drawing operation name (JS → Swift).
+    @Published var lastDrawingOperation: String?
+
+    /// UI test instrumentation: sum of drawing bitmap values after the last drawing operation (JS → Swift).
+    @Published var lastDrawingDrawSum: Double?
+
     // MARK: - Volume Info
 
     struct VolumeInfo: Codable, Equatable {
@@ -80,6 +103,25 @@ final class WebViewManager: NSObject, ObservableObject {
         let windowWidth: Double
         let windowLevel: Double
         let colormap: String
+    }
+
+    // MARK: - Click-to-Segment Debug (JS → Swift reporting)
+
+    struct ClickToSegmentDebug: Codable, Equatable {
+        let applyCount: Int
+        let drawSum: Double
+    }
+
+    struct ClickToSegmentResult: Codable, Equatable {
+        let mm3: Double?
+        let mL: Double?
+    }
+
+    // MARK: - Drawing Debug (JS → Swift reporting)
+
+    struct DrawingDebug: Codable, Equatable {
+        let operation: String
+        let drawSum: Double
     }
 
     // MARK: - WebView
@@ -191,6 +233,7 @@ final class WebViewManager: NSObject, ObservableObject {
 
         // Task 12: Wire importedFileStore to URL scheme handler
         urlSchemeHandler.importedFileStore = importedFileStore
+        urlSchemeHandler.preprocessedVolumeCache = PreprocessedVolumeCache()
 
         // Only configure the webView if we're not using a mock evaluator
         if evaluator == nil {
@@ -254,6 +297,10 @@ final class WebViewManager: NSObject, ObservableObject {
             lastErrorMessage = nil
             lastJSLogMessage = nil
             lastJSLogLevel = nil
+            lastClickToSegmentApplyCount = nil
+            lastClickToSegmentDrawSum = nil
+            lastClickToSegmentVolumeMM3 = nil
+            lastClickToSegmentVolumeML = nil
             timeoutTask?.cancel()
 
         case "volumeLoaded":
@@ -336,6 +383,30 @@ final class WebViewManager: NSObject, ObservableObject {
                envelope.type == "ctPresetAnalysis",
                let payload = envelope.payload {
                 lastCTPresetAnalysis = payload
+                return
+            }
+
+            if let envelope = try? JSONDecoder().decode(UpdateUIEnvelope<ClickToSegmentDebug>.self, from: data),
+               envelope.type == "clickToSegmentDebug",
+               let payload = envelope.payload {
+                lastClickToSegmentApplyCount = payload.applyCount
+                lastClickToSegmentDrawSum = payload.drawSum
+                return
+            }
+
+            if let envelope = try? JSONDecoder().decode(UpdateUIEnvelope<ClickToSegmentResult>.self, from: data),
+               envelope.type == "clickToSegmentResult",
+               let payload = envelope.payload {
+                lastClickToSegmentVolumeMM3 = payload.mm3
+                lastClickToSegmentVolumeML = payload.mL
+                return
+            }
+
+            if let envelope = try? JSONDecoder().decode(UpdateUIEnvelope<DrawingDebug>.self, from: data),
+               envelope.type == "drawingDebug",
+               let payload = envelope.payload {
+                lastDrawingOperation = payload.operation
+                lastDrawingDrawSum = payload.drawSum
                 return
             }
 
@@ -578,7 +649,65 @@ final class WebViewManager: NSObject, ObservableObject {
     ///   - volumeIndex: Index of the volume in nv.volumes
     ///   - opacity: Opacity value (0.0 to 1.0)
     func setOpacity(volumeIndex: Int, opacity: Double) async throws {
+        if volumes.indices.contains(volumeIndex) {
+            let volumeID = volumes[volumeIndex].id
+            lastKnownOpacityByVolumeID[volumeID] = opacity
+        }
         try await evaluator.evaluateCommand("window.setOpacity(\(volumeIndex), \(opacity))")
+    }
+
+    /// Temporarily hides/shows a volume by setting opacity to 0 and restoring the previous opacity.
+    func setVolumeVisible(volumeIndex: Int, isVisible: Bool) async throws {
+        if isVisible {
+            let restoredOpacity: Double
+
+            if volumes.indices.contains(volumeIndex) {
+                let volumeID = volumes[volumeIndex].id
+                restoredOpacity = hiddenOpacityBackupByVolumeID[volumeID]
+                    ?? lastKnownOpacityByVolumeID[volumeID]
+                    ?? 1.0
+                hiddenOpacityBackupByVolumeID[volumeID] = nil
+            } else {
+                restoredOpacity = 1.0
+            }
+
+            let appliedOpacity = restoredOpacity > 0 ? restoredOpacity : 1.0
+            try await setOpacity(volumeIndex: volumeIndex, opacity: appliedOpacity)
+            return
+        }
+
+        if volumes.indices.contains(volumeIndex) {
+            let volumeID = volumes[volumeIndex].id
+            let currentOpacity = lastKnownOpacityByVolumeID[volumeID] ?? 1.0
+            if currentOpacity > 0 {
+                hiddenOpacityBackupByVolumeID[volumeID] = currentOpacity
+            } else if hiddenOpacityBackupByVolumeID[volumeID] == nil {
+                hiddenOpacityBackupByVolumeID[volumeID] = 1.0
+            }
+        }
+
+        try await setOpacity(volumeIndex: volumeIndex, opacity: 0.0)
+    }
+
+    /// Removes a volume from the scene by index.
+    /// Keeps Swift-side `volumeSources` aligned and re-syncs `volumes` from the JS layer.
+    func removeVolumeByIndex(volumeIndex: Int) async throws {
+        lastErrorMessage = nil
+
+        let removedVolumeID = volumes.indices.contains(volumeIndex) ? volumes[volumeIndex].id : nil
+
+        try await evaluator.evaluateCommand("window.removeVolumeByIndex(\(volumeIndex))")
+
+        if volumeSources.indices.contains(volumeIndex) {
+            volumeSources.remove(at: volumeIndex)
+        }
+
+        if let removedVolumeID {
+            lastKnownOpacityByVolumeID.removeValue(forKey: removedVolumeID)
+            hiddenOpacityBackupByVolumeID.removeValue(forKey: removedVolumeID)
+        }
+
+        try await syncVolumeCount()
     }
 
     /// Gets the list of available colormaps.
@@ -623,6 +752,17 @@ final class WebViewManager: NSObject, ObservableObject {
     /// - Parameter enabled: Whether click-to-segment is enabled
     func setClickToSegmentEnabled(enabled: Bool) async throws {
         try await evaluator.evaluateCommand("window.setClickToSegmentEnabled(\(enabled))")
+    }
+
+    /// Applies a click-to-segment action at a screen point (CSS pixels) in the Niivue canvas.
+    func clickToSegmentAtScreenPoint(x: Double, y: Double) async throws {
+        try await evaluator.evaluateCommand("window.clickToSegmentAtScreenPoint(\(x), \(y))")
+    }
+
+    /// Applies Otsu thresholding to the drawing bitmap.
+    /// - Parameter levels: (2-4) number of classes for thresholding.
+    func drawOtsu(levels: Int) async throws {
+        try await evaluator.evaluateCommand("window.drawOtsu(\(levels))")
     }
 
     // MARK: - DICOM Import (Phase 2 Task 9)

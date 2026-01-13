@@ -94,6 +94,58 @@ export function setClickToSegmentEnabled(nv: Niivue, enabled: boolean): void {
   nv.opts.clickToSegment = enabled
 }
 
+/**
+ * Apply Otsu thresholding to the drawing bitmap.
+ *
+ * Note: Niivue's internal `findOtsu` uses `volume.cal_min/cal_max` as histogram bounds.
+ * When CT presets/windowing narrow this range, Otsu can become unstable or produce empty masks.
+ * To make segmentation robust, temporarily widen the histogram bounds to `global_min/global_max`.
+ *
+ * @param nv - The Niivue instance
+ * @param levels - (2-4) number of classes to segment into
+ */
+export function drawOtsu(nv: Niivue, levels: number): void {
+  const volume = (nv.volumes as any[] | undefined)?.[0]
+  if (!volume) {
+    console.warn('[volumeCommands] drawOtsu skipped: no volumes loaded')
+    return
+  }
+
+  const originalCalMin = volume.cal_min
+  const originalCalMax = volume.cal_max
+  const globalMin = volume.global_min
+  const globalMax = volume.global_max
+
+  try {
+    if (typeof globalMin === 'number' && typeof globalMax === 'number') {
+      volume.cal_min = globalMin
+      volume.cal_max = globalMax
+    }
+    nv.drawOtsu(levels)
+  } finally {
+    volume.cal_min = originalCalMin
+    volume.cal_max = originalCalMax
+  }
+}
+
+/**
+ * Remove a volume from the viewer by index.
+ * @param nv - The Niivue instance
+ * @param volumeIndex - Index of the volume in nv.volumes
+ */
+export function removeVolumeByIndex(nv: Niivue, volumeIndex: number): void {
+  if (volumeIndex < 0 || volumeIndex >= nv.volumes.length) {
+    console.warn(`[volumeCommands] No volume at index ${volumeIndex}`)
+    return
+  }
+  const anyNv = nv as any
+  if (typeof anyNv.removeVolumeByIndex !== 'function') {
+    console.warn('[volumeCommands] removeVolumeByIndex not available on Niivue instance')
+    return
+  }
+  anyNv.removeVolumeByIndex(volumeIndex)
+}
+
 // Phase 2 UI: Import + Sessions helpers
 
 export type UrlNamedItem = {

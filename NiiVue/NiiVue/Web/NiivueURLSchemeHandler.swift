@@ -23,6 +23,10 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
     /// Set this before the WebView starts making requests
     var dicomSeriesStore: DicomSeriesStore?
 
+    /// Preprocessed volume cache for serving disk-backed preprocessing outputs
+    /// Set this before the WebView starts making requests
+    var preprocessedVolumeCache: PreprocessedVolumeCache?
+
     private struct ActiveWork {
         let token: UUID
         let task: Task<Void, Never>
@@ -71,6 +75,15 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
 
         case .dicomFile(let seriesId, let fileName):
             serveDicomFile(seriesId: seriesId, fileName: fileName, task: urlSchemeTask)
+
+        case .preprocessedVolume(let studyID, let itemID, let parametersHash, let fileName):
+            servePreprocessedVolume(
+                studyID: studyID,
+                itemID: itemID,
+                parametersHash: parametersHash,
+                fileName: fileName,
+                task: urlSchemeTask
+            )
         }
     }
 
@@ -264,6 +277,51 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
                 task.didFailWithError(HandlerError.fileNotFound)
                 return
             }
+            if Task.isCancelled { return }
+            self?.serveFile(at: fileURL, task: task)
+        }
+
+        activeWork[taskID] = ActiveWork(token: token, task: work)
+    }
+
+    // MARK: - Preprocessed Volume Serving (Phase 2)
+
+    private func servePreprocessedVolume(
+        studyID: String,
+        itemID: String,
+        parametersHash: String,
+        fileName: String,
+        task: WKURLSchemeTask
+    ) {
+        let taskID = ObjectIdentifier(task as AnyObject)
+        let token = UUID()
+
+        let work = Task { @MainActor [weak self] in
+            defer {
+                if self?.activeWork[taskID]?.token == token {
+                    self?.activeWork[taskID] = nil
+                }
+            }
+
+            if Task.isCancelled { return }
+
+            guard fileName == "preprocessed.nii" || fileName == "preprocessed.nii.gz" else {
+                task.didFailWithError(HandlerError.routingFailed)
+                return
+            }
+
+            guard let cache = self?.preprocessedVolumeCache else {
+                task.didFailWithError(HandlerError.fileNotFound)
+                return
+            }
+
+            let fileURL = await cache.cachedFileURL(
+                studyID: studyID,
+                itemID: itemID,
+                parametersHash: parametersHash,
+                fileName: fileName
+            )
+
             if Task.isCancelled { return }
             self?.serveFile(at: fileURL, task: task)
         }
