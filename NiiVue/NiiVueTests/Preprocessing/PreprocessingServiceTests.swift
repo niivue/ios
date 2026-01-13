@@ -1,4 +1,3 @@
-import DicomCore
 import nnUNetPreprocessing
 import simd
 import XCTest
@@ -7,13 +6,13 @@ import XCTest
 final class PreprocessingServiceTests: XCTestCase {
     private final class CountingDicomLoader: DicomSeriesVolumeLoading {
         private(set) var loadCount: Int = 0
-        private let volume: DicomSeriesVolume
+        private let volume: VolumeBuffer
 
-        init(volume: DicomSeriesVolume) {
+        init(volume: VolumeBuffer) {
             self.volume = volume
         }
 
-        func loadSeries(from dicomFileURLs: [URL]) throws -> DicomSeriesVolume {
+        func loadSeries(from dicomFileURLs: [URL]) throws -> VolumeBuffer {
             loadCount += 1
             return volume
         }
@@ -48,31 +47,23 @@ final class PreprocessingServiceTests: XCTestCase {
 
         let cache = PreprocessedVolumeCache(baseURL: tempDir.appendingPathComponent("cache", isDirectory: true))
 
-        // Synthetic 2x2x1 signed-int16 volume (raw) with identity orientation in patient space.
-        let voxels = [Int16(0), 100, 200, 300]
+        // Synthetic 2x2x1 float32 volume (already HU) with identity orientation in patient space.
+        let voxels = [Float(0), 100, 200, 300]
         let voxelData = voxels.withUnsafeBytes { Data($0) }
         let orientation = simd_double3x3(columns: (
-            SIMD3<Double>(1, 0, 0), // row
-            SIMD3<Double>(0, 1, 0), // column
-            SIMD3<Double>(0, 0, 1)  // normal
+            SIMD3<Double>(0, 0, 1), // z axis
+            SIMD3<Double>(0, 1, 0), // y axis
+            SIMD3<Double>(1, 0, 0)  // x axis
         ))
-
-        let series = DicomSeriesVolume(
-            voxels: voxelData,
-            width: 2,
-            height: 2,
-            depth: 1,
+        let volume = VolumeBuffer(
+            data: voxelData,
+            shape: (depth: 1, height: 2, width: 2),
             spacing: SIMD3<Double>(1, 1, 1),
-            orientation: orientation,
             origin: SIMD3<Double>(10, 20, 30),
-            rescaleSlope: 1.0,
-            rescaleIntercept: 0.0,
-            bitsAllocated: 16,
-            isSignedPixel: true,
-            seriesDescription: "test"
+            orientation: orientation
         )
 
-        let loader = CountingDicomLoader(volume: series)
+        let loader = CountingDicomLoader(volume: volume)
         let preprocessor = CountingPreprocessor()
         let writer = CountingWriter()
 
@@ -122,30 +113,13 @@ final class PreprocessingServiceTests: XCTestCase {
             parameters: parameters
         )
 
-        let voxels = [Int16(0), 0, 0, 0]
-        let voxelData = voxels.withUnsafeBytes { Data($0) }
-        let orientation = simd_double3x3(columns: (
-            SIMD3<Double>(1, 0, 0),
-            SIMD3<Double>(0, 1, 0),
-            SIMD3<Double>(0, 0, 1)
-        ))
-
-        let series = DicomSeriesVolume(
-            voxels: voxelData,
-            width: 2,
-            height: 2,
-            depth: 1,
-            spacing: SIMD3<Double>(1, 1, 1),
-            orientation: orientation,
-            origin: SIMD3<Double>(0, 0, 0),
-            rescaleSlope: 1.0,
-            rescaleIntercept: 0.0,
-            bitsAllocated: 16,
-            isSignedPixel: true,
-            seriesDescription: "test"
+        let volume = VolumeBuffer(
+            data: Data(repeating: 0, count: 4 * MemoryLayout<Float>.size),
+            shape: (depth: 1, height: 2, width: 2),
+            spacing: SIMD3<Double>(1, 1, 1)
         )
 
-        let loader = CountingDicomLoader(volume: series)
+        let loader = CountingDicomLoader(volume: volume)
         let preprocessor = CountingPreprocessor()
         let writer = CountingWriter()
 
@@ -169,4 +143,3 @@ final class PreprocessingServiceTests: XCTestCase {
         XCTAssertEqual(result.outputURL.lastPathComponent, "preprocessed.nii")
     }
 }
-

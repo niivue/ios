@@ -1,9 +1,8 @@
-import DicomCore
 import Foundation
 import nnUNetPreprocessing
 
 protocol DicomSeriesVolumeLoading {
-    func loadSeries(from dicomFileURLs: [URL]) throws -> DicomSeriesVolume
+    func loadSeries(from dicomFileURLs: [URL]) throws -> VolumeBuffer
 }
 
 protocol VolumePreprocessing {
@@ -39,8 +38,7 @@ struct PreprocessingService {
         }
 
         let start = Date()
-        let series = try dicomLoader.loadSeries(from: dicomFileURLs)
-        let volumeHU = DicomBridge.convert(series)
+        let volumeHU = try dicomLoader.loadSeries(from: dicomFileURLs)
         let processed = try await preprocessor.preprocess(volumeHU, parameters: parameters)
 
         let stagingDir = FileManager.default.temporaryDirectory
@@ -62,4 +60,3 @@ struct PreprocessingService {
         return result
     }
 }
-
