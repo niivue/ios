@@ -41,6 +41,42 @@ final class WebViewManagerCommandTests: XCTestCase {
         )
     }
 
+    func testLoadPreprocessedVolumeStoresCacheThenLoadsViaPreprocessedURL() async throws {
+        let js = MockJavaScriptEvaluator()
+        let manager = WebViewManager(evaluator: js)
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NiiVuePreprocessTest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let cache = PreprocessedVolumeCache(baseURL: tempDir.appendingPathComponent("cache", isDirectory: true))
+        manager.urlSchemeHandler.preprocessedVolumeCache = cache
+
+        let sourceFile = tempDir.appendingPathComponent("source.nii.gz", isDirectory: false)
+        try Data("test".utf8).write(to: sourceFile)
+
+        let parameters = CTPreprocessingParameters.urinaryTractDefaults
+        try await manager.loadPreprocessedVolume(
+            studyID: "study1",
+            itemID: "item1",
+            sourceURL: sourceFile,
+            parameters: parameters
+        )
+
+        let cached = await cache.getCached(studyID: "study1", itemID: "item1", parameters: parameters)
+        XCTAssertEqual(cached?.outputURL.lastPathComponent, "preprocessed.nii.gz")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cached?.outputURL.path ?? ""))
+
+        XCTAssertEqual(js.scripts.count, 1)
+        XCTAssertTrue(js.scripts[0].contains("window.loadImageFromUrl"))
+
+        let expectedURL = "niivue://app/preprocessed/study1/item1/\(parameters.parametersHash)/preprocessed.nii.gz"
+        let expectedURLEscaped = try JavaScriptQuote.jsonStringLiteral(expectedURL)
+        XCTAssertTrue(js.scripts[0].contains(expectedURLEscaped))
+        XCTAssertEqual(manager.volumeSources, [.init(url: expectedURL, name: "preprocessed.nii.gz")])
+    }
+
     func testSetSliceTypeUsesJSONEscapedArguments() async throws {
         let js = MockJavaScriptEvaluator()
         let manager = WebViewManager(evaluator: js)

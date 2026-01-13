@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   addVolumesFromUrls,
   applyViewerState,
+  buildPreprocessedVolumeUrl,
   drawOtsu,
   exportViewerState,
   loadMeshesFromUrls,
@@ -115,5 +116,15 @@ describe('volumeCommands (Phase 2 UI extensions)', () => {
     expect(nv.drawOtsu).toHaveBeenCalledWith(3)
     expect(volume.cal_min).toBe(0)
     expect(volume.cal_max).toBe(100)
+  })
+
+  it('buildPreprocessedVolumeUrl builds niivue://app/preprocessed paths', () => {
+    expect(buildPreprocessedVolumeUrl('study123', 'item456', 'abc123', 'preprocessed.nii.gz')).toBe(
+      'niivue://app/preprocessed/study123/item456/abc123/preprocessed.nii.gz'
+    )
+
+    expect(buildPreprocessedVolumeUrl('study123', 'item456', 'abc123')).toBe(
+      'niivue://app/preprocessed/study123/item456/abc123/preprocessed.nii'
+    )
   })
 })

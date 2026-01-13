@@ -154,6 +154,21 @@ export type UrlNamedItem = {
 }
 
 /**
+ * Build a niivue:// URL for a preprocessed volume served by the native app.
+ *
+ * Path format:
+ * `niivue://app/preprocessed/<studyID>/<itemID>/<parametersHash>/preprocessed.nii(.gz)`
+ */
+export function buildPreprocessedVolumeUrl(
+  studyID: string,
+  itemID: string,
+  parametersHash: string,
+  fileName: string = 'preprocessed.nii'
+): string {
+  return `niivue://app/preprocessed/${studyID}/${itemID}/${parametersHash}/${fileName}`
+}
+
+/**
  * Add volumes (e.g., label masks / overlay textures) without clearing existing volumes.
  * @param nv - The Niivue instance
  * @param volumes - Array of {url, name}

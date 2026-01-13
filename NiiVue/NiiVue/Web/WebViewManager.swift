@@ -465,6 +465,11 @@ final class WebViewManager: NSObject, ObservableObject {
 
     // MARK: - Volume Loading
 
+    enum PreprocessedVolumeError: Error {
+        case cacheUnavailable
+        case failedToStore
+    }
+
     /// Loads a base64-encoded image into Niivue.
     /// - Parameters:
     ///   - base64: Base64-encoded image data
@@ -490,6 +495,58 @@ final class WebViewManager: NSObject, ObservableObject {
         let urlEscaped = try JavaScriptQuote.jsonStringLiteral(url)
         let nameEscaped = try JavaScriptQuote.jsonStringLiteral(fileName)
         _ = try await evaluator.callAsyncString("return await window.loadImageFromUrl(\(urlEscaped), \(nameEscaped))")
+    }
+
+    /// Loads a preprocessed volume from the native cache via `niivue://app/preprocessed/...`.
+    /// Ensures the file exists in `PreprocessedVolumeCache` before Niivue requests it.
+    func loadPreprocessedVolume(
+        studyID: String,
+        itemID: String,
+        sourceURL: URL,
+        parameters: CTPreprocessingParameters
+    ) async throws {
+        guard let cache = urlSchemeHandler.preprocessedVolumeCache else {
+            throw PreprocessedVolumeError.cacheUnavailable
+        }
+
+        let cached: PreprocessedResult? = await cache.getCached(studyID: studyID, itemID: itemID, parameters: parameters)
+        let resolved: PreprocessedResult
+
+        if let cached {
+            resolved = cached
+        } else {
+            let start = Date()
+            let result = PreprocessedResult(
+                outputURL: sourceURL,
+                processingTime: Date().timeIntervalSince(start),
+                parameters: parameters
+            )
+            try await cache.store(studyID: studyID, itemID: itemID, result: result)
+
+            guard let stored = await cache.getCached(studyID: studyID, itemID: itemID, parameters: parameters) else {
+                throw PreprocessedVolumeError.failedToStore
+            }
+            resolved = stored
+        }
+
+        let fileName = resolved.outputURL.lastPathComponent
+        let preprocessedURL = Self.preprocessedVolumeURL(
+            studyID: studyID,
+            itemID: itemID,
+            parametersHash: parameters.parametersHash,
+            fileName: fileName
+        )
+
+        try await loadImageFromUrl(url: preprocessedURL, fileName: fileName)
+    }
+
+    private static func preprocessedVolumeURL(
+        studyID: String,
+        itemID: String,
+        parametersHash: String,
+        fileName: String
+    ) -> String {
+        "niivue://app/preprocessed/\(studyID)/\(itemID)/\(parametersHash)/\(fileName)"
     }
 
     /// Loads multiple volumes from URLs (Phase 2 Task 2: multi-volume overlays).
