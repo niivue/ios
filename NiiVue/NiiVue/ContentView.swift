@@ -2384,8 +2384,19 @@ struct ContentView: View {
                                 }
 
                                 // Load via URL instead of base64 (eliminates memory overhead)
-                                let niivueURL = "niivue://app/files/\(imported.id)"
-                                try await webViewManager.loadImageFromUrl(url: niivueURL, fileName: imported.originalFileName)
+                                if imported.originalFileName.lowercased().hasSuffix(".nii") ||
+                                    imported.originalFileName.lowercased().hasSuffix(".nii.gz")
+                                {
+                                    try await webViewManager.loadPreprocessedVolume(
+                                        studyID: imported.id,
+                                        itemID: "imported",
+                                        sourceURL: imported.localURL,
+                                        parameters: .urinaryTractDefaults
+                                    )
+                                } else {
+                                    let niivueURL = "niivue://app/files/\(imported.id)"
+                                    try await webViewManager.loadImageFromUrl(url: niivueURL, fileName: imported.originalFileName)
+                                }
                             } catch {
                                 print("Error importing file: \(error)")
 
