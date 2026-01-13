@@ -124,4 +124,25 @@ final class PreprocessedVolumeCacheTests: XCTestCase {
 
         XCTAssertNil(retrieved)
     }
+
+    func testStoreGeneratedMovesFileAndWritesMetadata() async throws {
+        let generatedFile = testDir.appendingPathComponent("generated.nii", isDirectory: false)
+        try Data("generated".utf8).write(to: generatedFile)
+
+        let parameters = CTPreprocessingParameters.urinaryTractDefaults
+        let stored = try await cache.storeGenerated(
+            studyID: "study1",
+            itemID: "item1",
+            generatedFileURL: generatedFile,
+            processingTime: 1.23,
+            parameters: parameters
+        )
+
+        XCTAssertEqual(stored.outputURL.lastPathComponent, "preprocessed.nii")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stored.outputURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: generatedFile.path), "Generated file should be moved into cache (no extra copy).")
+
+        let retrieved = await cache.getCached(studyID: "study1", itemID: "item1", parameters: parameters)
+        XCTAssertEqual(retrieved, stored)
+    }
 }

@@ -84,18 +84,7 @@ public actor PreprocessedVolumeCache {
         let cacheDir = cacheDirectory(studyID: studyID, itemID: itemID, parametersHash: parametersHash)
         try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
 
-        let ext: String
-        if result.outputURL.pathExtension.lowercased() == "gz",
-           result.outputURL.deletingPathExtension().pathExtension.lowercased() == "nii"
-        {
-            ext = "nii.gz"
-        } else if result.outputURL.pathExtension.isEmpty {
-            ext = "nii"
-        } else {
-            ext = result.outputURL.pathExtension
-        }
-
-        let cachedVolumeURL = cacheDir.appendingPathComponent("preprocessed.\(ext)", isDirectory: false)
+        let cachedVolumeURL = cacheDir.appendingPathComponent(cachedFileName(for: result.outputURL), isDirectory: false)
         if FileManager.default.fileExists(atPath: cachedVolumeURL.path) {
             try FileManager.default.removeItem(at: cachedVolumeURL)
         }
@@ -110,6 +99,44 @@ public actor PreprocessedVolumeCache {
         try metadataData.write(to: cacheDir.appendingPathComponent("metadata.json", isDirectory: false))
 
         memoryCache[cacheKey(studyID: studyID, itemID: itemID, parameters: result.parameters)] = storedResult
+    }
+
+    public func storeGenerated(
+        studyID: String,
+        itemID: String,
+        generatedFileURL: URL,
+        processingTime: TimeInterval,
+        parameters: CTPreprocessingParameters
+    ) throws -> PreprocessedResult {
+        let cacheDir = cacheDirectory(studyID: studyID, itemID: itemID, parametersHash: parameters.parametersHash)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+
+        let cachedVolumeURL = cacheDir.appendingPathComponent(cachedFileName(for: generatedFileURL), isDirectory: false)
+        if FileManager.default.fileExists(atPath: cachedVolumeURL.path) {
+            try FileManager.default.removeItem(at: cachedVolumeURL)
+        }
+
+        do {
+            try FileManager.default.moveItem(at: generatedFileURL, to: cachedVolumeURL)
+        } catch {
+            // Fallback for cross-volume moves (should be rare on iOS, but safe).
+            try FileManager.default.copyItem(at: generatedFileURL, to: cachedVolumeURL)
+            try? FileManager.default.removeItem(at: generatedFileURL)
+        }
+
+        let storedResult = PreprocessedResult(
+            outputURL: cachedVolumeURL,
+            processingTime: processingTime,
+            parameters: parameters
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let metadataData = try encoder.encode(storedResult)
+        try metadataData.write(to: cacheDir.appendingPathComponent("metadata.json", isDirectory: false))
+
+        memoryCache[cacheKey(studyID: studyID, itemID: itemID, parameters: parameters)] = storedResult
+        return storedResult
     }
 
     public func invalidate(studyID: String) {
@@ -135,6 +162,21 @@ public actor PreprocessedVolumeCache {
             .appendingPathComponent(studyID, isDirectory: true)
             .appendingPathComponent(itemID, isDirectory: true)
             .appendingPathComponent(parametersHash, isDirectory: true)
+    }
+
+    private func cachedFileName(for url: URL) -> String {
+        let ext: String
+        if url.pathExtension.lowercased() == "gz",
+           url.deletingPathExtension().pathExtension.lowercased() == "nii"
+        {
+            ext = "nii.gz"
+        } else if url.pathExtension.isEmpty {
+            ext = "nii"
+        } else {
+            ext = url.pathExtension
+        }
+
+        return "preprocessed.\(ext)"
     }
 
     public func cachedFileURL(

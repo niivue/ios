@@ -51,8 +51,12 @@
 		3627108DB23D41C1AA3439A1 /* CTPreprocessingParameters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79259EF8530D4549859B05F3 /* CTPreprocessingParameters.swift */; };
 		3BC590A86410462F9A850254 /* PreprocessedVolumeCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEC70358F3BC4A799E9D2D83 /* PreprocessedVolumeCache.swift */; };
 		490FFFC9A0BE4E6785976839 /* PreprocessingContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C6956F96284A15BF444606 /* PreprocessingContext.swift */; };
+		B8F1019AF3A0ABBD9A30630A /* NiftiWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6012792540A2396CAD130B6F /* NiftiWriter.swift */; };
+		A26D1CF0DFEB550B4F51E8FB /* PreprocessingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16729CBDBCA997F983DF52F2 /* PreprocessingService.swift */; };
 		755DC56C68CE45C080C4ADF3 /* CTPreprocessingParametersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF37BABDC367406DAF93D740 /* CTPreprocessingParametersTests.swift */; };
 		C654B1DD5F4343A7A1AF2A6C /* PreprocessedVolumeCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EA7243442C845C5A0F85F73 /* PreprocessedVolumeCacheTests.swift */; };
+		7B277BD1E89B2E8651C25D81 /* NiftiWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D3FA576CD8C6026F28389A9 /* NiftiWriterTests.swift */; };
+		3DDEE989ADCF1025C7031189 /* PreprocessingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85C9DC972891B2ED0FE5BB06 /* PreprocessingServiceTests.swift */; };
 		0C2CFF4D1CD44F9F8A51F41B /* PreprocessingContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F969D36DDE464C1DBB79526B /* PreprocessingContextTests.swift */; };
 		9FD68E87FCC14B0B91057700 /* nnUNetPreprocessing in Frameworks */ = {isa = PBXBuildFile; productRef = 7F9CAC282DA440BFB12FCED8 /* nnUNetPreprocessing */; };
 	/* End PBXBuildFile section */
@@ -138,10 +142,14 @@
 		3C2C8CD003E4BE0DA0797E0E /* CTPresetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CTPresetService.swift; sourceTree = "<group>"; };
 		CF37BABDC367406DAF93D740 /* CTPreprocessingParametersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/CTPreprocessingParametersTests.swift; sourceTree = "<group>"; };
 		1EA7243442C845C5A0F85F73 /* PreprocessedVolumeCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessedVolumeCacheTests.swift; sourceTree = "<group>"; };
+		7D3FA576CD8C6026F28389A9 /* NiftiWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/NiftiWriterTests.swift; sourceTree = "<group>"; };
+		85C9DC972891B2ED0FE5BB06 /* PreprocessingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessingServiceTests.swift; sourceTree = "<group>"; };
 		F969D36DDE464C1DBB79526B /* PreprocessingContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessingContextTests.swift; sourceTree = "<group>"; };
 		79259EF8530D4549859B05F3 /* CTPreprocessingParameters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/CTPreprocessingParameters.swift; sourceTree = "<group>"; };
 		CEC70358F3BC4A799E9D2D83 /* PreprocessedVolumeCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessedVolumeCache.swift; sourceTree = "<group>"; };
 		62C6956F96284A15BF444606 /* PreprocessingContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessingContext.swift; sourceTree = "<group>"; };
+		6012792540A2396CAD130B6F /* NiftiWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/NiftiWriter.swift; sourceTree = "<group>"; };
+		16729CBDBCA997F983DF52F2 /* PreprocessingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessingService.swift; sourceTree = "<group>"; };
 	/* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -228,6 +236,8 @@
 				76E2A5095D83C725AF9B05BB /* CTPresetServiceTests.swift */,
 				CF37BABDC367406DAF93D740 /* CTPreprocessingParametersTests.swift */,
 				1EA7243442C845C5A0F85F73 /* PreprocessedVolumeCacheTests.swift */,
+				7D3FA576CD8C6026F28389A9 /* NiftiWriterTests.swift */,
+				85C9DC972891B2ED0FE5BB06 /* PreprocessingServiceTests.swift */,
 				F969D36DDE464C1DBB79526B /* PreprocessingContextTests.swift */,
 				B1C2D3E401234567ABCDEF04 /* DrawingExportServiceTests.swift */,
 				B1C2D3E401234567ABCDEF06 /* WebViewManagerStateTests.swift */,
@@ -275,6 +285,8 @@
 					79259EF8530D4549859B05F3 /* CTPreprocessingParameters.swift */,
 					CEC70358F3BC4A799E9D2D83 /* PreprocessedVolumeCache.swift */,
 					62C6956F96284A15BF444606 /* PreprocessingContext.swift */,
+					6012792540A2396CAD130B6F /* NiftiWriter.swift */,
+					16729CBDBCA997F983DF52F2 /* PreprocessingService.swift */,
 					B1C2D3E401234567ABCDEF02 /* DrawingExportService.swift */,
 					C1D2E3F401234567ABCDEF02 /* FileImportService.swift */,
 					E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */,
@@ -455,6 +467,8 @@
 					3627108DB23D41C1AA3439A1 /* CTPreprocessingParameters.swift in Sources */,
 					3BC590A86410462F9A850254 /* PreprocessedVolumeCache.swift in Sources */,
 					490FFFC9A0BE4E6785976839 /* PreprocessingContext.swift in Sources */,
+					B8F1019AF3A0ABBD9A30630A /* NiftiWriter.swift in Sources */,
+					A26D1CF0DFEB550B4F51E8FB /* PreprocessingService.swift in Sources */,
 					B1C2D3E401234567ABCDEF01 /* DrawingExportService.swift in Sources */,
 					C1D2E3F401234567ABCDEF01 /* FileImportService.swift in Sources */,
 					D1E2F3A401234567ABCDEF01 /* NiivueURLRouter.swift in Sources */,
@@ -479,6 +493,8 @@
 					05FA761B8C45710BE98CADFB /* CTPresetServiceTests.swift in Sources */,
 					755DC56C68CE45C080C4ADF3 /* CTPreprocessingParametersTests.swift in Sources */,
 					C654B1DD5F4343A7A1AF2A6C /* PreprocessedVolumeCacheTests.swift in Sources */,
+					7B277BD1E89B2E8651C25D81 /* NiftiWriterTests.swift in Sources */,
+					3DDEE989ADCF1025C7031189 /* PreprocessingServiceTests.swift in Sources */,
 					0C2CFF4D1CD44F9F8A51F41B /* PreprocessingContextTests.swift in Sources */,
 					B1C2D3E401234567ABCDEF03 /* DrawingExportServiceTests.swift in Sources */,
 					B1C2D3E401234567ABCDEF05 /* WebViewManagerStateTests.swift in Sources */,
