@@ -27,3 +27,6 @@ Test_CT_DICOM_volumes/
 model-zoo/
 renalStructures_CECT_segmentation/
 iOS/
+
+# Git worktrees
+.worktrees/
