@@ -931,7 +931,7 @@ final class NiiVueUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "--ui-test-dicom-dir",
-            "dicom-fixtures/VOLUME_MED_E_ABD_3"
+            "Test_CT_DICOM_volumes/Dicom_Volume_1"
         ]
         app.launch()
 
@@ -979,12 +979,127 @@ final class NiiVueUITests: XCTestCase {
         XCTAssertTrue(finalJSLog.contains("[DICOM]"), "Expected JS DICOM loader logs to be forwarded to native layer. jsLog='\(finalJSLog)'")
     }
 
+    /// Geraldo dataset: Load a 512x512x484 CT DICOM series from a device fixture directory.
+    func testDicomImportGeraldoSeriesLoadsVolume() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--ui-test-dicom-dir",
+            "Test_CT_DICOM_volumes/GERALDO_TRINDADE_FIRMINO/VOLUME_VENOSO_MED_E_ABD_9"
+        ]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 30), "Expected ready label to exist in UI test mode.")
+
+        let statusLabel = app.staticTexts["niivue.dicomImportStatusGlobal"]
+        XCTAssertTrue(statusLabel.waitForExistence(timeout: 30), "Expected global DICOM status label to exist.")
+
+        let errorLabel = app.staticTexts["niivue.lastError"]
+        XCTAssertTrue(errorLabel.waitForExistence(timeout: 30), "Expected last error label to exist.")
+
+        let jsLogLabel = app.staticTexts["niivue.lastJSLog"]
+        XCTAssertTrue(jsLogLabel.waitForExistence(timeout: 30), "Expected JS log label to exist.")
+
+        // Wait for the app to be ready for commands.
+        let readyDeadline = Date().addingTimeInterval(60)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+
+        // Wait for the DICOM load to either succeed or surface a failure message.
+        let volumeCountLabel = app.staticTexts["niivue.volumeCount"]
+        XCTAssertTrue(volumeCountLabel.waitForExistence(timeout: 30), "Expected volume count label to exist.")
+
+        let deadline = Date().addingTimeInterval(240)
+        while Date() < deadline {
+            let status = statusLabel.label
+            let volumeCount = Int(volumeCountLabel.label) ?? 0
+            if status.contains("Loaded") && volumeCount > 0 { break }
+            if status.contains("Failed") { break }
+            sleep(2)
+        }
+
+        let finalStatus = statusLabel.label
+        let finalError = errorLabel.label
+        let finalJSLog = jsLogLabel.label
+        let finalVolumeCount = Int(volumeCountLabel.label) ?? 0
+        print("[UI] Geraldo DICOM final: status=\(finalStatus) error=\(finalError) jsLog=\(finalJSLog) volumeCount=\(finalVolumeCount)")
+
+        XCTAssertTrue(finalStatus.contains("Loaded"), "Expected Geraldo DICOM series to load. status='\(finalStatus)' error='\(finalError)' jsLog='\(finalJSLog)'")
+        XCTAssertGreaterThan(finalVolumeCount, 0, "Expected at least 1 loaded volume after Geraldo DICOM import.")
+    }
+
+    /// Geraldo dataset: After loading DICOM, load exactly one `.nii.gz` segmentation overlay from device fixtures.
+    func testDicomImportGeraldoThenLoadsOneSegmentationOverlay() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--ui-test-dicom-dir",
+            "Test_CT_DICOM_volumes/GERALDO_TRINDADE_FIRMINO/VOLUME_VENOSO_MED_E_ABD_9",
+            "--ui-test-seg-dir",
+            "Test_CT_DICOM_volumes/Geraldo_FULL_Segmentations",
+            "--ui-test-seg-limit",
+            "1"
+        ]
+        app.launch()
+
+        let readyLabel = app.staticTexts["niivue.isReady"]
+        let dicomStatusLabel = app.staticTexts["niivue.dicomImportStatusGlobal"]
+        let segStatusLabel = app.staticTexts["niivue.segImportStatusGlobal"]
+        let volumeCountLabel = app.staticTexts["niivue.volumeCount"]
+        let errorLabel = app.staticTexts["niivue.lastError"]
+
+        XCTAssertTrue(readyLabel.waitForExistence(timeout: 30))
+        XCTAssertTrue(dicomStatusLabel.waitForExistence(timeout: 30))
+        XCTAssertTrue(segStatusLabel.waitForExistence(timeout: 30))
+        XCTAssertTrue(volumeCountLabel.waitForExistence(timeout: 30))
+        XCTAssertTrue(errorLabel.waitForExistence(timeout: 30))
+
+        let readyDeadline = Date().addingTimeInterval(60)
+        while Date() < readyDeadline {
+            if readyLabel.label == "ready" { break }
+            sleep(1)
+        }
+        XCTAssertEqual(readyLabel.label, "ready")
+
+        // Wait for base DICOM to load.
+        let dicomDeadline = Date().addingTimeInterval(240)
+        while Date() < dicomDeadline {
+            let status = dicomStatusLabel.label
+            let volumeCount = Int(volumeCountLabel.label) ?? 0
+            if status.contains("Loaded") && volumeCount > 0 { break }
+            if status.contains("Failed") { break }
+            sleep(2)
+        }
+        XCTAssertTrue(dicomStatusLabel.label.contains("Loaded"), "Expected DICOM to load before segmentation overlay. status='\(dicomStatusLabel.label)' error='\(errorLabel.label)'")
+
+        // Then wait for at least one overlay to be added (volume count >= 2).
+        let overlayDeadline = Date().addingTimeInterval(240)
+        while Date() < overlayDeadline {
+            let segStatus = segStatusLabel.label
+            let volumeCount = Int(volumeCountLabel.label) ?? 0
+            if segStatus.contains("Loaded") && volumeCount >= 2 { break }
+            if segStatus.contains("Failed") { break }
+            sleep(2)
+        }
+
+        let finalSegStatus = segStatusLabel.label
+        let finalError = errorLabel.label
+        let finalVolumeCount = Int(volumeCountLabel.label) ?? 0
+        print("[UI] Geraldo seg final: status=\(finalSegStatus) error=\(finalError) volumeCount=\(finalVolumeCount)")
+
+        XCTAssertTrue(finalSegStatus.contains("Loaded"), "Expected segmentation overlay to load. status='\(finalSegStatus)' error='\(finalError)'")
+        XCTAssertGreaterThanOrEqual(finalVolumeCount, 2, "Expected at least 2 volumes after adding segmentation overlay.")
+        XCTAssertFalse(finalError.lowercased().contains("failed"), "Expected no failure in lastError, got '\(finalError)'")
+    }
+
     /// Phase 2 Task 9: DICOM - Missing fixture directory should fail fast and never crash.
     func testDicomImportMissingFixtureDirectoryShowsFailure() throws {
         let app = XCUIApplication()
         app.launchArguments = [
             "--ui-test-dicom-dir",
-            "dicom-fixtures/DOES_NOT_EXIST"
+            "Test_CT_DICOM_volumes/DOES_NOT_EXIST"
         ]
         app.launch()
 
@@ -1030,7 +1145,7 @@ final class NiiVueUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "--ui-test-dicom-dir",
-            "dicom-fixtures/VOLUME_MED_E_ABD_3"
+            "Test_CT_DICOM_volumes/Dicom_Volume_1"
         ]
         app.launch()
 
@@ -1134,7 +1249,7 @@ final class NiiVueUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "--ui-test-dicom-dir",
-            "dicom-fixtures/VOLUME_MED_E_ABD_3"
+            "Test_CT_DICOM_volumes/Dicom_Volume_1"
         ]
         app.launch()
 

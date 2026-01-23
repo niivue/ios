@@ -739,12 +739,32 @@ struct ContentView: View {
         return value.isEmpty ? nil : value
     }
 
+    private var uiTestSegRelativeDirectory: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--ui-test-seg-dir") else { return nil }
+        let valueIndex = args.index(after: index)
+        guard valueIndex < args.endIndex else { return nil }
+        let value = args[valueIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private var uiTestSegLimit: Int {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--ui-test-seg-limit") else { return 1 }
+        let valueIndex = args.index(after: index)
+        guard valueIndex < args.endIndex else { return 1 }
+        let raw = args[valueIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = Int(raw) ?? 1
+        return max(1, value)
+    }
+
     private var isUITestMode: Bool {
         isUITestLoadMultiple ||
             isUITestSessionsTemp ||
             isUITestSimulateTwoFingerPan ||
             isUITestSimulateTwoFingerPinch ||
-            uiTestDicomRelativeDirectory != nil
+            uiTestDicomRelativeDirectory != nil ||
+            uiTestSegRelativeDirectory != nil
     }
 
     private var is2DSliceType: Bool {
@@ -848,7 +868,19 @@ struct ContentView: View {
                 }
             }
 
-            let plan = SegmentationAssetImportPlanner.plan(importedFiles: importedFiles)
+            // Safety: NIfTI overlays can be extremely large when decompressed (e.g. 512×512×484),
+            // and attempting to load dozens at once can OOM or stall WebKit/GPU.
+            // Default to a conservative cap and instruct users to import in batches.
+            let originalPlan = SegmentationAssetImportPlanner.plan(importedFiles: importedFiles)
+            let maxVolumeOverlaysToLoad = 5
+            let volumeSpecsSorted = originalPlan.volumeSpecs.sorted { $0.name < $1.name }
+            let limitedVolumeSpecs = Array(volumeSpecsSorted.prefix(maxVolumeOverlaysToLoad))
+            let plan = SegmentationAssetImportPlan(
+                volumeSpecs: limitedVolumeSpecs,
+                meshSpecs: originalPlan.meshSpecs,
+                unsupportedFileNames: originalPlan.unsupportedFileNames
+            )
+            let skippedVolumeCount = max(0, originalPlan.volumeSpecs.count - plan.volumeSpecs.count)
             do {
                 try await SegmentationAssetImportExecutor.execute(plan: plan, webViewManager: webViewManager)
             } catch {
@@ -860,6 +892,9 @@ struct ContentView: View {
 
             let loadedCount = plan.volumeSpecs.count + plan.meshSpecs.count
             var summary = "Imported \(importedFiles.count)/\(pickedURLs.count) file(s). Loaded \(loadedCount) asset(s)."
+            if skippedVolumeCount > 0 {
+                summary.append(" Skipped \(skippedVolumeCount) volume overlay(s) (select fewer to avoid OOM).")
+            }
             if !plan.unsupportedFileNames.isEmpty {
                 summary.append(" Unsupported: \(plan.unsupportedFileNames.joined(separator: ", ")).")
             }
@@ -918,6 +953,53 @@ struct ContentView: View {
         }
 
         // Deterministic order helps reproducibility (and matches manifest ordering).
+        return results.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private func collectSegmentationFiles(from pickedURLs: [URL]) -> [URL] {
+        let fileManager = FileManager.default
+
+        func isSegmentationCandidateFile(_ url: URL) -> Bool {
+            let fileName = url.lastPathComponent.lowercased()
+            if fileName.hasSuffix(".nii.gz") { return true }
+            let ext = url.pathExtension.lowercased()
+            return ext == "nii"
+        }
+
+        func isDirectory(_ url: URL) -> Bool {
+            (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }
+
+        func isRegularFile(_ url: URL) -> Bool {
+            // Treat unknown as a file, since some providers may omit this.
+            (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) != false
+        }
+
+        var results: [URL] = []
+
+        for url in pickedURLs {
+            if isDirectory(url) {
+                guard let enumerator = fileManager.enumerator(
+                    at: url,
+                    includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                ) else {
+                    continue
+                }
+
+                for case let entryURL as URL in enumerator {
+                    if isDirectory(entryURL) { continue }
+                    guard isRegularFile(entryURL) else { continue }
+                    guard isSegmentationCandidateFile(entryURL) else { continue }
+                    results.append(entryURL)
+                }
+            } else {
+                guard isRegularFile(url) else { continue }
+                guard isSegmentationCandidateFile(url) else { continue }
+                results.append(url)
+            }
+        }
+
         return results.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
@@ -1513,18 +1595,46 @@ struct ContentView: View {
                     }
 
                     let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                    let fixtureDir = documentsDir.appendingPathComponent(relativeDir, isDirectory: true)
+                    let documentsFixtureDir = documentsDir.appendingPathComponent(relativeDir, isDirectory: true)
+                    let bundleFixtureDir = Bundle.main.resourceURL?.appendingPathComponent(relativeDir, isDirectory: true)
 
-                    let fileURLs: [URL]
-                    do {
-                        fileURLs = try FileManager.default.contentsOfDirectory(
-                            at: fixtureDir,
-                            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
-                            options: [.skipsHiddenFiles]
-                        )
-                    } catch {
+                    let candidateDirs: [(label: String, url: URL)] = {
+                        var candidates: [(label: String, url: URL)] = [("Documents", documentsFixtureDir)]
+                        if let bundleFixtureDir {
+                            candidates.append(("Bundle", bundleFixtureDir))
+                        }
+                        return candidates
+                    }()
+
+                    var selectedDir: URL?
+                    var fileURLs: [URL] = []
+                    var lastReadError: Error?
+
+                    for candidate in candidateDirs {
+                        do {
+                            let urls = try FileManager.default.contentsOfDirectory(
+                                at: candidate.url,
+                                includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+                                options: [.skipsHiddenFiles]
+                            )
+                            selectedDir = candidate.url
+                            fileURLs = urls
+                            break
+                        } catch {
+                            lastReadError = error
+                        }
+                    }
+
+                    guard let selectedDir else {
                         await MainActor.run {
-                            dicomImportStatusMessage = "Failed to read fixture dir: \(error.localizedDescription)"
+                            let attempted = candidateDirs
+                                .map { "\($0.label): \($0.url.path)" }
+                                .joined(separator: " | ")
+                            if let lastReadError {
+                                dicomImportStatusMessage = "Failed to read fixture dir (\(attempted)): \(lastReadError.localizedDescription)"
+                            } else {
+                                dicomImportStatusMessage = "Failed to read fixture dir (\(attempted))."
+                            }
                         }
                         return
                     }
@@ -1550,6 +1660,7 @@ struct ContentView: View {
                         dicomImportStatusMessage = "Loading \(dicomFiles.count) DICOM file(s)…"
                     }
 
+                    print("[ContentView] UI test DICOM fixture dir resolved to \(selectedDir.path)")
                     let seriesId = await dicomSeriesStore.register(files: dicomFiles)
                     webViewManager.urlSchemeHandler.dicomSeriesStore = dicomSeriesStore
 
@@ -1559,9 +1670,103 @@ struct ContentView: View {
                         await MainActor.run {
                             dicomImportStatusMessage = "Loaded \(dicomFiles.count) DICOM file(s)."
                         }
+
+                        if let segRelativeDir = uiTestSegRelativeDirectory {
+                            await MainActor.run {
+                                segmentationImportInProgress = true
+                                segmentationImportStatusMessage = "Loading segmentation fixture…"
+                            }
+
+                            defer {
+                                Task { @MainActor in
+                                    segmentationImportInProgress = false
+                                }
+                            }
+
+                            let segDocumentsDir = documentsDir.appendingPathComponent(segRelativeDir, isDirectory: true)
+                            let segBundleDir = Bundle.main.resourceURL?.appendingPathComponent(segRelativeDir, isDirectory: true)
+
+                            let segCandidateDirs: [(label: String, url: URL)] = {
+                                var candidates: [(label: String, url: URL)] = [("Documents", segDocumentsDir)]
+                                if let segBundleDir {
+                                    candidates.append(("Bundle", segBundleDir))
+                                }
+                                return candidates
+                            }()
+
+                            var selectedSegDir: URL?
+                            var lastSegReadError: Error?
+
+                            for candidate in segCandidateDirs {
+                                do {
+                                    _ = try FileManager.default.contentsOfDirectory(
+                                        at: candidate.url,
+                                        includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+                                        options: [.skipsHiddenFiles]
+                                    )
+                                    selectedSegDir = candidate.url
+                                    break
+                                } catch {
+                                    lastSegReadError = error
+                                }
+                            }
+
+                            guard let selectedSegDir else {
+                                await MainActor.run {
+                                    let attempted = segCandidateDirs
+                                        .map { "\($0.label): \($0.url.path)" }
+                                        .joined(separator: " | ")
+                                    if let lastSegReadError {
+                                        segmentationImportStatusMessage = "Failed to read seg fixture dir (\(attempted)): \(lastSegReadError.localizedDescription)"
+                                    } else {
+                                        segmentationImportStatusMessage = "Failed to read seg fixture dir (\(attempted))."
+                                    }
+                                    webViewManager.lastErrorMessage = segmentationImportStatusMessage
+                                }
+                                return
+                            }
+
+                            let segFilesAll = collectSegmentationFiles(from: [selectedSegDir])
+                            let segFiles = Array(segFilesAll.prefix(uiTestSegLimit))
+
+                            guard !segFiles.isEmpty else {
+                                await MainActor.run {
+                                    segmentationImportStatusMessage = "Failed: no segmentation files found in fixture dir."
+                                    webViewManager.lastErrorMessage = segmentationImportStatusMessage
+                                }
+                                return
+                            }
+
+                            var volumeSpecs: [(url: String, name: String)] = []
+                            for fileURL in segFiles {
+                                let id = UUID().uuidString
+                                let imported = FileImportService.ImportedFile(
+                                    id: id,
+                                    originalFileName: fileURL.lastPathComponent,
+                                    localURL: fileURL
+                                )
+                                await webViewManager.importedFileStore.register(importedFile: imported)
+                                volumeSpecs.append((url: "niivue://app/files/\(id)", name: imported.originalFileName))
+                            }
+
+                            do {
+                                try await webViewManager.addVolumesFromUrls(volumeSpecs)
+                                await MainActor.run {
+                                    segmentationImportStatusMessage = "Loaded \(volumeSpecs.count) segmentation overlay(s)."
+                                }
+                            } catch {
+                                await MainActor.run {
+                                    let message = "Failed to load segmentation overlays: \(error.localizedDescription)"
+                                    segmentationImportStatusMessage = message
+                                    webViewManager.lastErrorMessage = message
+                                }
+                            }
+                        }
                     } catch {
                         await MainActor.run {
-                            let message = "Failed to load DICOM series: \(error.localizedDescription)"
+                            let nsError = error as NSError
+                            print("[ContentView] DICOM fixture load failed: domain=\(nsError.domain) code=\(nsError.code) userInfo=\(nsError.userInfo)")
+                            let message = "Failed to load DICOM series (\(nsError.domain) \(nsError.code)): \(nsError.localizedDescription)"
                             dicomImportStatusMessage = message
                             webViewManager.lastErrorMessage = message
                         }
@@ -2751,6 +2956,8 @@ struct ContentView: View {
                                     .accessibilityIdentifier("niivue.twoFingerPanInstalledView")
                                 Text(dicomImportStatusMessage ?? "")
                                     .accessibilityIdentifier("niivue.dicomImportStatusGlobal")
+                                Text(segmentationImportStatusMessage ?? "")
+                                    .accessibilityIdentifier("niivue.segImportStatusGlobal")
                                 Text(webViewManager.lastErrorMessage ?? "")
                                     .accessibilityIdentifier("niivue.lastError")
                                 Text(webViewManager.lastJSLogMessage ?? "")

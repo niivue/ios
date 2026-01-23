@@ -470,6 +470,25 @@ final class WebViewManager: NSObject, ObservableObject {
         case failedToStore
     }
 
+    /// Executes an async JS call where Swift doesn't need the return value.
+    ///
+    /// `WKWebView.callAsyncJavaScript` can throw `WKError.Code.javaScriptResultTypeIsUnsupported`
+    /// if a Promise resolves (or rejects) with a value that can't be bridged to Foundation types.
+    /// This wrapper ensures the JS boundary is always:
+    /// - resolved with `null` (bridges as `NSNull`)
+    /// - rejected with a `String` (bridgable, deterministic failure reason)
+    private func callAsyncVoid(_ awaitedCall: String) async throws {
+        let functionBody = """
+        try {
+          \(awaitedCall)
+          return null;
+        } catch (e) {
+          throw String(e);
+        }
+        """
+        _ = try await evaluator.callAsyncString(functionBody)
+    }
+
     /// Loads a base64-encoded image into Niivue.
     /// - Parameters:
     ///   - base64: Base64-encoded image data
@@ -480,7 +499,7 @@ final class WebViewManager: NSObject, ObservableObject {
         volumeSources.removeAll()
         let b64 = try JavaScriptQuote.jsonStringLiteral(base64)
         let name = try JavaScriptQuote.jsonStringLiteral(fileName)
-        _ = try await evaluator.callAsyncString("return await window.loadBase64Image(\(b64), \(name))")
+        try await callAsyncVoid("await window.loadBase64Image(\(b64), \(name));")
     }
 
     /// Loads an image from a URL into Niivue (Task 12: URL-based loading).
@@ -494,7 +513,7 @@ final class WebViewManager: NSObject, ObservableObject {
         volumeSources = [.init(url: url, name: fileName)]
         let urlEscaped = try JavaScriptQuote.jsonStringLiteral(url)
         let nameEscaped = try JavaScriptQuote.jsonStringLiteral(fileName)
-        _ = try await evaluator.callAsyncString("return await window.loadImageFromUrl(\(urlEscaped), \(nameEscaped))")
+        try await callAsyncVoid("await window.loadImageFromUrl(\(urlEscaped), \(nameEscaped));")
     }
 
     /// Loads a preprocessed volume from the native cache via `niivue://app/preprocessed/...`.
@@ -564,7 +583,7 @@ final class WebViewManager: NSObject, ObservableObject {
         }
         let jsonArray = "[\(volumeArray.joined(separator: ","))]"
 
-        _ = try await evaluator.callAsyncString("return await window.loadVolumesFromUrls(\(jsonArray))")
+        try await callAsyncVoid("await window.loadVolumesFromUrls(\(jsonArray));")
 
         // Query Niivue's volume count to update our tracking
         // (onImageLoaded callbacks may be deferred)
@@ -585,7 +604,7 @@ final class WebViewManager: NSObject, ObservableObject {
         }
         let jsonArray = "[\(volumeArray.joined(separator: ","))]"
 
-        _ = try await evaluator.callAsyncString("return await window.addVolumesFromUrls(\(jsonArray))")
+        try await callAsyncVoid("await window.addVolumesFromUrls(\(jsonArray));")
         try await syncVolumeCount()
     }
 
@@ -601,7 +620,7 @@ final class WebViewManager: NSObject, ObservableObject {
         }
         let jsonArray = "[\(meshArray.joined(separator: ","))]"
 
-        _ = try await evaluator.callAsyncString("return await window.loadMeshesFromUrls(\(jsonArray))")
+        try await callAsyncVoid("await window.loadMeshesFromUrls(\(jsonArray));")
     }
 
     /// Exports a thin viewer state snapshot as JSON (Phase 2 UI: sessions).
@@ -829,9 +848,25 @@ final class WebViewManager: NSObject, ObservableObject {
     /// - Parameter manifestUrl: The manifest URL (e.g., niivue://app/dicom/series1/niivue-manifest.txt)
     func loadDicomSeriesFromManifestURL(_ manifestUrl: String) async throws {
         let urlEscaped = try JavaScriptQuote.jsonStringLiteral(manifestUrl)
-        // `window.loadDicomSeriesFromManifest(...)` returns a Promise; use callAsyncString so we await completion and
-        // propagate any rejection back to Swift (and avoid "unsupported type" errors from returning a Promise).
-        _ = try await evaluator.callAsyncString("return await window.loadDicomSeriesFromManifest(\(urlEscaped))")
+        // `callAsyncJavaScript` can throw `WKError.javaScriptResultTypeIsUnsupported` if the
+        // resolved value (or rejection reason) can't be bridged back to Swift.
+        //
+        // Wrap the call in `try/await` so synchronous failures (e.g., missing bridge function)
+        // are caught, and always:
+        // - resolve to `null` (bridges as `NSNull`)
+        // - reject with a `String` (bridgable, deterministic failure reason)
+        let functionBody = """
+        try {
+          if (typeof window.loadDicomSeriesFromManifest !== 'function') {
+            throw 'window.loadDicomSeriesFromManifest is not a function (typeof=' + (typeof window.loadDicomSeriesFromManifest) + ')';
+          }
+          await window.loadDicomSeriesFromManifest(\(urlEscaped));
+          return null;
+        } catch (e) {
+          throw String(e);
+        }
+        """
+        _ = try await evaluator.callAsyncString(functionBody)
     }
 
     // MARK: - View Controls
