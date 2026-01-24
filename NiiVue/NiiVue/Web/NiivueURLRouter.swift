@@ -15,6 +15,7 @@ struct NiivueURLRouter {
         case importedFile(id: String)     // `files/<id>` (app sandbox)
         // Phase 2 Task 8: DICOM manifest and file endpoints
         case dicomManifest(seriesId: String)           // `dicom/<seriesId>/niivue-manifest.txt`
+        case dicomBundle(seriesId: String)             // `dicom/<seriesId>/bundle.bin`
         case dicomFile(seriesId: String, fileName: String)  // `dicom/<seriesId>/<fileName>`
         // Phase 2: Native preprocessing (disk-backed) endpoints
         case preprocessedVolume(studyID: String, itemID: String, parametersHash: String, fileName: String) // `preprocessed/<studyID>/<itemID>/<parametersHash>/<fileName>`
@@ -68,6 +69,8 @@ struct NiivueURLRouter {
 
                 if fileName == "niivue-manifest.txt" {
                     return .dicomManifest(seriesId: seriesId)
+                } else if fileName == "bundle.bin" {
+                    return .dicomBundle(seriesId: seriesId)
                 } else {
                     return .dicomFile(seriesId: seriesId, fileName: fileName)
                 }

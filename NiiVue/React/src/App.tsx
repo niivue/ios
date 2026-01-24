@@ -33,7 +33,7 @@ import {
   applyViewerState as nvApplyViewerState
 } from './bridge/volumeCommands'
 // Phase 2 Task 7: DICOM loader and bridge
-import { dicomLoader } from '@niivue/dicom-loader'
+import { dicomLoader } from './bridge/dicomLoaderMainThread'
 import { loadDicomSeriesFromManifest as nvLoadDicomSeriesFromManifest } from './bridge/dicomBridge'
 
 function describeError(error: unknown): string {
@@ -608,16 +608,30 @@ function App() {
   }
 
   // Phase 2 Task 7: DICOM manifest loading
-  async function loadDicomSeriesFromManifest(manifestUrl: string): Promise<void> {
+  async function loadDicomSeriesFromManifest(manifestUrl: string, requestId?: number): Promise<void> {
     const start = Date.now()
-    logToIOS('info', `[DICOM] Load start: ${manifestUrl}`)
+    const requestLabel = typeof requestId === 'number' ? ` requestId=${requestId}` : ''
+    logToIOS('info', `[DICOM] Load start:${requestLabel} ${manifestUrl}`)
     try {
       await nvLoadDicomSeriesFromManifest(nv, manifestUrl)
       const elapsedMs = Date.now() - start
       logToIOS('info', `[DICOM] Load succeeded in ${elapsedMs}ms`)
+      if (typeof requestId === 'number') {
+        postToIOS('updateUI', {
+          type: 'dicomLoad',
+          payload: { requestId, ok: true, elapsedMs },
+        })
+      }
     } catch (error) {
       const elapsedMs = Date.now() - start
-      logToIOS('error', `[DICOM] Load failed in ${elapsedMs}ms: ${describeError(error)}`)
+      const message = describeError(error)
+      logToIOS('error', `[DICOM] Load failed in ${elapsedMs}ms: ${message}`)
+      if (typeof requestId === 'number') {
+        postToIOS('updateUI', {
+          type: 'dicomLoad',
+          payload: { requestId, ok: false, elapsedMs, error: message },
+        })
+      }
       throw error
     }
   }

@@ -10,6 +10,7 @@
 import SwiftUI
 import WebKit
 import Foundation
+import DicomCore
 import UniformTypeIdentifiers
 import UIKit
 
@@ -177,7 +178,8 @@ struct DocumentPickerMultiple: UIViewControllerRepresentable {
     }
 
     static func makePicker(delegate: UIDocumentPickerDelegate) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.data], asCopy: true)
+        // Allow selecting either individual files or a folder (e.g., DICOM series directory or segmentation folder).
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.data, UTType.folder], asCopy: true)
         picker.allowsMultipleSelection = true
         picker.delegate = delegate
         return picker
@@ -835,13 +837,52 @@ struct ContentView: View {
         Task {
             await MainActor.run {
                 segmentationImportInProgress = true
-                segmentationImportStatusMessage = "Importing \(pickedURLs.count) file(s)…"
+                segmentationImportStatusMessage = "Scanning selection…"
             }
 
             defer {
                 Task { @MainActor in
                     segmentationImportInProgress = false
                 }
+            }
+
+            // Document picker selections (especially folders and iCloud providers) are often security-scoped.
+            // Keep access open for the full scan + import so directory enumeration and file copies succeed.
+            let accessedURLs = pickedURLs.filter { $0.startAccessingSecurityScopedResource() }
+            defer {
+                for url in accessedURLs {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            let selectedFiles = collectSegmentationAssetFiles(from: pickedURLs)
+            guard !selectedFiles.isEmpty else {
+                await MainActor.run {
+                    segmentationImportStatusMessage = "No files found in selection."
+                }
+                return
+            }
+
+            let supportedFiles = selectedFiles.filter { SegmentationAssetClassifier.classify(url: $0) != .unsupported }
+            let unsupportedFileNames = selectedFiles
+                .filter { SegmentationAssetClassifier.classify(url: $0) == .unsupported }
+                .map { $0.lastPathComponent }
+                .sorted()
+
+            guard !supportedFiles.isEmpty else {
+                await MainActor.run {
+                    var message = "No supported segmentation assets found in selection."
+                    if !unsupportedFileNames.isEmpty {
+                        let preview = unsupportedFileNames.prefix(8).joined(separator: ", ")
+                        message.append(" Unsupported: \(preview)\(unsupportedFileNames.count > 8 ? ", …" : "").")
+                    }
+                    segmentationImportStatusMessage = message
+                }
+                return
+            }
+
+            await MainActor.run {
+                segmentationImportStatusMessage = "Importing \(supportedFiles.count) file(s)…"
             }
 
             let libraryDir = FileImportService.defaultLibraryDirectory()
@@ -858,7 +899,7 @@ struct ContentView: View {
             var importedFiles: [FileImportService.ImportedFile] = []
             var failedImports: [String] = []
 
-            for url in pickedURLs {
+            for url in supportedFiles {
                 do {
                     let imported = try await fileImportService.importDocument(at: url, destinationDirectory: libraryDir)
                     importedFiles.append(imported)
@@ -872,7 +913,7 @@ struct ContentView: View {
             // and attempting to load dozens at once can OOM or stall WebKit/GPU.
             // Default to a conservative cap and instruct users to import in batches.
             let originalPlan = SegmentationAssetImportPlanner.plan(importedFiles: importedFiles)
-            let maxVolumeOverlaysToLoad = 5
+            let maxVolumeOverlaysToLoad = 1
             let volumeSpecsSorted = originalPlan.volumeSpecs.sorted { $0.name < $1.name }
             let limitedVolumeSpecs = Array(volumeSpecsSorted.prefix(maxVolumeOverlaysToLoad))
             let plan = SegmentationAssetImportPlan(
@@ -891,12 +932,12 @@ struct ContentView: View {
             }
 
             let loadedCount = plan.volumeSpecs.count + plan.meshSpecs.count
-            var summary = "Imported \(importedFiles.count)/\(pickedURLs.count) file(s). Loaded \(loadedCount) asset(s)."
+            var summary = "Imported \(importedFiles.count)/\(supportedFiles.count) file(s). Loaded \(loadedCount) asset(s)."
             if skippedVolumeCount > 0 {
                 summary.append(" Skipped \(skippedVolumeCount) volume overlay(s) (select fewer to avoid OOM).")
             }
-            if !plan.unsupportedFileNames.isEmpty {
-                summary.append(" Unsupported: \(plan.unsupportedFileNames.joined(separator: ", ")).")
+            if !unsupportedFileNames.isEmpty {
+                summary.append(" Unsupported: \(unsupportedFileNames.prefix(12).joined(separator: ", "))\(unsupportedFileNames.count > 12 ? ", …" : "").")
             }
             if !failedImports.isEmpty {
                 summary.append(" Failed: \(failedImports.joined(separator: ", ")).")
@@ -1003,6 +1044,272 @@ struct ContentView: View {
         return results.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
+    private func collectSegmentationAssetFiles(from pickedURLs: [URL]) -> [URL] {
+        let fileManager = FileManager.default
+
+        func isDirectory(_ url: URL) -> Bool {
+            (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }
+
+        func isRegularFile(_ url: URL) -> Bool {
+            // Treat unknown as a file, since some providers may omit this.
+            (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) != false
+        }
+
+        var results: [URL] = []
+
+        for url in pickedURLs {
+            if isDirectory(url) {
+                guard let enumerator = fileManager.enumerator(
+                    at: url,
+                    includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                ) else {
+                    continue
+                }
+
+                for case let entryURL as URL in enumerator {
+                    if isDirectory(entryURL) { continue }
+                    guard isRegularFile(entryURL) else { continue }
+                    results.append(entryURL)
+                }
+            } else {
+                guard isRegularFile(url) else { continue }
+                results.append(url)
+            }
+        }
+
+        return results.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private struct DicomConversionOutput {
+        let imported: FileImportService.ImportedFile
+        let width: Int
+        let height: Int
+        let depth: Int
+        let elapsedSeconds: Double
+    }
+
+    private func describeDicomSeriesLoaderError(_ error: Error) -> String {
+        guard let loaderError = error as? DicomSeriesLoaderError else {
+            return error.localizedDescription
+        }
+
+        switch loaderError {
+        case .noDicomFiles:
+            return "No DICOM files found in the selected folder."
+        case .unsupportedSamplesPerPixel(let value):
+            return "Unsupported DICOM: samplesPerPixel=\(value) (expected 1)."
+        case .unsupportedBitDepth(let value):
+            return "Unsupported DICOM: bit depth=\(value) (expected 16-bit)."
+        case .inconsistentDimensions:
+            return "Selected folder contains mixed image dimensions (likely multiple series)."
+        case .inconsistentOrientation:
+            return "Selected folder contains mixed slice orientations (likely multiple series)."
+        case .inconsistentPixelRepresentation:
+            return "Selected folder contains mixed pixel representations (signed/unsigned)."
+        case .failedToDecode(let url):
+            return "Failed to decode DICOM slice: \(url.lastPathComponent)."
+        }
+    }
+
+    private func sanitizeFileNameBase(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "dicom_series" }
+
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: " _-"))
+        let mapped = String(trimmed.unicodeScalars.map { scalar in
+            allowed.contains(scalar) ? Character(scalar) : "_"
+        })
+        let collapsed = mapped
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "__", with: "_")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "_-"))
+
+        let limited = collapsed.isEmpty ? "dicom_series" : String(collapsed.prefix(72))
+        return limited
+    }
+
+    private func convertDicomSeriesToNifti(directory: URL, suggestedName: String?) async throws -> DicomConversionOutput {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let start = Date()
+                do {
+                    DispatchQueue.main.async {
+                        webViewManager.lastJSLogLevel = "info"
+                        webViewManager.lastJSLogMessage = "[DICOM] Native decode start…"
+                    }
+
+                    let loader = DicomSeriesLoader()
+                    var lastProgressUpdate = Date.distantPast
+
+                    func progressCallback(_ slicesCopied: Int, _ depth: Int) {
+                        let now = Date()
+                        guard now.timeIntervalSince(lastProgressUpdate) > 0.75 else { return }
+                        lastProgressUpdate = now
+
+                        DispatchQueue.main.async {
+                            let message = "Decoding DICOM… \(slicesCopied)/\(depth) slice(s)"
+                            dicomImportStatusMessage = message
+                            webViewManager.lastJSLogLevel = "info"
+                            webViewManager.lastJSLogMessage = "[DICOM] \(message)"
+                        }
+                    }
+
+                    func decodeSeries(in directory: URL) throws -> DicomSeriesVolume {
+                        try loader.loadSeries(in: directory) { _, slicesCopied, _, progressVolume in
+                            progressCallback(slicesCopied, progressVolume.depth)
+                        }
+                    }
+
+                    var volume: DicomSeriesVolume
+                    do {
+                        volume = try decodeSeries(in: directory)
+                    } catch {
+                        guard let loaderError = error as? DicomSeriesLoaderError,
+                              case .failedToDecode = loaderError else {
+                            throw error
+                        }
+
+                        // Fallback: copy to a staging dir and retry while skipping any unreadable slices.
+                        // This allows us to tolerate a small number of corrupted/un-decodable files.
+                        let fm = FileManager.default
+                        let stagingDir = fm.temporaryDirectory
+                            .appendingPathComponent("NiiVue-DicomRetry-\(UUID().uuidString)", isDirectory: true)
+                        try fm.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+                        defer { try? fm.removeItem(at: stagingDir) }
+
+                        func enumerateDicomFiles(in directory: URL) throws -> [URL] {
+                            let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey]
+                            guard let enumerator = fm.enumerator(
+                                at: directory,
+                                includingPropertiesForKeys: keys,
+                                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                            ) else {
+                                return []
+                            }
+
+                            var urls: [URL] = []
+                            for case let fileURL as URL in enumerator {
+                                let values = try fileURL.resourceValues(forKeys: Set(keys))
+                                if values.isDirectory == true { continue }
+                                if values.isRegularFile != true { continue }
+                                let ext = fileURL.pathExtension.lowercased()
+                                if ext == "dcm" || ext == "dicom" || ext.isEmpty {
+                                    urls.append(fileURL)
+                                }
+                            }
+                            return urls.sorted { $0.lastPathComponent < $1.lastPathComponent }
+                        }
+
+                        let sourceFiles = try enumerateDicomFiles(in: directory)
+                        guard !sourceFiles.isEmpty else {
+                            throw DicomSeriesLoaderError.noDicomFiles
+                        }
+
+                        DispatchQueue.main.async {
+                            let message = "Copying \(sourceFiles.count) DICOM file(s) for retry…"
+                            dicomImportStatusMessage = message
+                            webViewManager.lastJSLogLevel = "info"
+                            webViewManager.lastJSLogMessage = "[DICOM] \(message)"
+                        }
+
+                        for sourceURL in sourceFiles {
+                            let destURL = stagingDir.appendingPathComponent(sourceURL.lastPathComponent, isDirectory: false)
+                            if fm.fileExists(atPath: destURL.path) {
+                                try? fm.removeItem(at: destURL)
+                            }
+                            try fm.copyItem(at: sourceURL, to: destURL)
+                        }
+
+                        var skipped: [String] = []
+                        let maxSkips = 12
+
+                        while true {
+                            do {
+                                volume = try decodeSeries(in: stagingDir)
+                                break
+                            } catch {
+                                guard let retryError = error as? DicomSeriesLoaderError,
+                                      case let .failedToDecode(badURL) = retryError else {
+                                    throw error
+                                }
+
+                                let badFileName = badURL.lastPathComponent
+                                skipped.append(badFileName)
+
+                                DispatchQueue.main.async {
+                                    let message = "Skipping unreadable slice \(badFileName) (\(skipped.count)/\(maxSkips))…"
+                                    dicomImportStatusMessage = message
+                                    webViewManager.lastJSLogLevel = "warn"
+                                    webViewManager.lastJSLogMessage = "[DICOM] \(message)"
+                                }
+
+                                try? fm.removeItem(at: stagingDir.appendingPathComponent(badFileName, isDirectory: false))
+
+                                if skipped.count >= maxSkips {
+                                    let preview = skipped.prefix(6).joined(separator: ", ")
+                                    throw NSError(
+                                        domain: "NiiVue.DICOM",
+                                        code: 4,
+                                        userInfo: [
+                                            NSLocalizedDescriptionKey: "Failed to decode too many DICOM slices. First skipped: \(preview)\(skipped.count > 6 ? ", …" : "")."
+                                        ]
+                                    )
+                                }
+                            }
+                        }
+
+                        if !skipped.isEmpty {
+                            DispatchQueue.main.async {
+                                webViewManager.lastJSLogLevel = "warn"
+                                webViewManager.lastJSLogMessage = "[DICOM] Loaded with \(skipped.count) skipped slice(s)."
+                            }
+                        }
+                    }
+
+                    let libraryDir = FileImportService.defaultLibraryDirectory()
+                    try FileManager.default.createDirectory(at: libraryDir, withIntermediateDirectories: true)
+
+                    let id = UUID().uuidString
+                    let entryDir = libraryDir.appendingPathComponent(id, isDirectory: true)
+                    try FileManager.default.createDirectory(at: entryDir, withIntermediateDirectories: true)
+
+                    let baseName = sanitizeFileNameBase(suggestedName ?? volume.seriesDescription)
+                    let fileName = "\(baseName).nii"
+                    let destURL = entryDir.appendingPathComponent(fileName, isDirectory: false)
+
+                    DispatchQueue.main.async {
+                        let message = "Writing NIfTI… \(fileName)"
+                        dicomImportStatusMessage = message
+                        webViewManager.lastJSLogLevel = "info"
+                        webViewManager.lastJSLogMessage = "[DICOM] \(message)"
+                    }
+
+                    try NiftiWriter.write(dicomVolume: volume, to: destURL)
+
+                    let elapsedSeconds = Date().timeIntervalSince(start)
+                    let imported = FileImportService.ImportedFile(id: id, originalFileName: fileName, localURL: destURL)
+                    DispatchQueue.main.async {
+                        webViewManager.lastJSLogLevel = "info"
+                        webViewManager.lastJSLogMessage = "[DICOM] Native decode complete (\(volume.width)×\(volume.height)×\(volume.depth))"
+                    }
+                    continuation.resume(
+                        returning: DicomConversionOutput(
+                            imported: imported,
+                            width: volume.width,
+                            height: volume.height,
+                            depth: volume.depth,
+                            elapsedSeconds: elapsedSeconds
+                        )
+                    )
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     private func importDicomSeries(from pickedURLs: [URL]) {
         Task {
             await MainActor.run {
@@ -1017,6 +1324,13 @@ struct ContentView: View {
             }
 
             // Expand folders and filter to DICOM candidates (.dcm, .dicom, or files without extension).
+            let accessedURLs = pickedURLs.filter { $0.startAccessingSecurityScopedResource() }
+            defer {
+                for url in accessedURLs {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+
             let dicomURLs = collectDicomFiles(from: pickedURLs)
 
             guard !dicomURLs.isEmpty else {
@@ -1039,61 +1353,107 @@ struct ContentView: View {
                 return
             }
 
+            // Always stage DICOM files into an app-owned temporary directory before handing them to WKWebView.
+            // This avoids fragile long-lived security-scoped access during the (potentially minutes-long) JS/WASM conversion.
             await MainActor.run {
                 dicomImportStatusMessage = "Importing \(dicomURLs.count) DICOM file(s)…"
             }
 
-            let libraryDir = FileImportService.defaultLibraryDirectory()
+            let stagingDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("NiiVue-DicomImport-\(UUID().uuidString)", isDirectory: true)
+
             do {
-                try FileManager.default.createDirectory(at: libraryDir, withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
             } catch {
                 await MainActor.run {
-                    dicomImportStatusMessage = "Failed to create Library directory: \(error.localizedDescription)"
+                    dicomImportStatusMessage = "Failed to create staging directory: \(error.localizedDescription)"
                 }
                 return
             }
 
-            let fileImportService = FileImportService()
-            var importedFileURLs: [URL] = []
+            var stagedURLs: [URL] = []
             var failedImports: [String] = []
 
-            for url in dicomURLs {
+            for (index, sourceURL) in dicomURLs.enumerated() {
+                let destURL = stagingDir.appendingPathComponent(sourceURL.lastPathComponent, isDirectory: false)
                 do {
-                    let imported = try await fileImportService.importDocument(at: url, destinationDirectory: libraryDir)
-                    await webViewManager.importedFileStore.register(importedFile: imported)
-                    importedFileURLs.append(imported.localURL)
+                    if FileManager.default.fileExists(atPath: destURL.path) {
+                        try FileManager.default.removeItem(at: destURL)
+                    }
+
+                    // If the picker gave us a tmp copy (asCopy: true), moving is safe and faster.
+                    if sourceURL.path.hasPrefix(FileManager.default.temporaryDirectory.path) {
+                        try FileManager.default.moveItem(at: sourceURL, to: destURL)
+                    } else {
+                        try FileManager.default.copyItem(at: sourceURL, to: destURL)
+                    }
+
+                    stagedURLs.append(destURL)
+
+                    if index % 75 == 0 || index == (dicomURLs.count - 1) {
+                        await MainActor.run {
+                            dicomImportStatusMessage = "Imported \(stagedURLs.count)/\(dicomURLs.count) DICOM file(s)…"
+                        }
+                    }
                 } catch {
-                    failedImports.append(url.lastPathComponent)
+                    failedImports.append(sourceURL.lastPathComponent)
                 }
             }
 
-            guard !importedFileURLs.isEmpty else {
+            guard !stagedURLs.isEmpty else {
                 await MainActor.run {
                     dicomImportStatusMessage = "Failed to import any DICOM files."
                 }
+                try? FileManager.default.removeItem(at: stagingDir)
                 return
             }
 
-            // Register the series with DicomSeriesStore
-            let seriesId = await dicomSeriesStore.register(files: importedFileURLs)
-
-            // Set the store on the URL scheme handler
-            webViewManager.urlSchemeHandler.dicomSeriesStore = dicomSeriesStore
-
-            // Load the DICOM series via manifest
-            let manifestURL = "niivue://app/dicom/\(seriesId)/niivue-manifest.txt"
             do {
-                try await webViewManager.loadDicomSeriesFromManifestURL(manifestURL)
                 await MainActor.run {
-                    dicomImportStatusMessage = "Loaded \(importedFileURLs.count) DICOM file(s)."
+                    dicomImportStatusMessage = "Converting \(stagedURLs.count) DICOM file(s)…"
+                    webViewManager.lastJSLogLevel = "info"
+                    webViewManager.lastJSLogMessage = "[DICOM] Staged \(stagedURLs.count) file(s), starting JS/WASM conversion…"
+                }
+
+                let seriesId = await dicomSeriesStore.register(files: stagedURLs)
+                webViewManager.urlSchemeHandler.dicomSeriesStore = dicomSeriesStore
+                let manifestURL = "niivue://app/dicom/\(seriesId)/niivue-manifest.txt"
+                try await webViewManager.loadDicomSeriesFromManifestURL(manifestURL)
+
+                await MainActor.run {
+                    var message = "Loaded DICOM series (\(stagedURLs.count) file(s))."
+                    if !failedImports.isEmpty {
+                        message.append(" Failed: \(failedImports.sorted().joined(separator: ", ")).")
+                    }
+                    dicomImportStatusMessage = message
                 }
             } catch {
-                await MainActor.run {
-                    let message = "Failed to load DICOM series: \(error.localizedDescription)"
-                    dicomImportStatusMessage = message
-                    webViewManager.lastErrorMessage = message
+                do {
+                    await MainActor.run {
+                        let message = "JS/WASM conversion failed: \(error.localizedDescription). Falling back to native decode…"
+                        dicomImportStatusMessage = message
+                        webViewManager.lastJSLogLevel = "warn"
+                        webViewManager.lastJSLogMessage = "[DICOM] \(message)"
+                    }
+
+                    let suggestedName = pickedURLs.first?.lastPathComponent
+                    let output = try await convertDicomSeriesToNifti(directory: stagingDir, suggestedName: suggestedName)
+                    await webViewManager.importedFileStore.register(importedFile: output.imported)
+                    try await webViewManager.loadImageFromUrl(url: "niivue://app/files/\(output.imported.id)", fileName: output.imported.originalFileName)
+
+                    await MainActor.run {
+                        dicomImportStatusMessage = "Loaded DICOM series (\(output.width)×\(output.height)×\(output.depth)) via native decode."
+                    }
+                } catch {
+                    await MainActor.run {
+                        let message = "Failed to load DICOM series: \(describeDicomSeriesLoaderError(error))"
+                        dicomImportStatusMessage = message
+                        webViewManager.lastErrorMessage = message
+                    }
                 }
             }
+
+            try? FileManager.default.removeItem(at: stagingDir)
         }
     }
 
@@ -1607,18 +1967,16 @@ struct ContentView: View {
                     }()
 
                     var selectedDir: URL?
-                    var fileURLs: [URL] = []
                     var lastReadError: Error?
 
                     for candidate in candidateDirs {
                         do {
-                            let urls = try FileManager.default.contentsOfDirectory(
+                            _ = try FileManager.default.contentsOfDirectory(
                                 at: candidate.url,
                                 includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
                                 options: [.skipsHiddenFiles]
                             )
                             selectedDir = candidate.url
-                            fileURLs = urls
                             break
                         } catch {
                             lastReadError = error
@@ -1639,15 +1997,7 @@ struct ContentView: View {
                         return
                     }
 
-                    let dicomFiles = fileURLs
-                        .filter { url in
-                            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
-                            guard values?.isDirectory != true else { return false }
-                            guard values?.isRegularFile != false else { return false }
-                            let ext = url.pathExtension.lowercased()
-                            return ext == "dcm" || ext == "dicom" || ext.isEmpty
-                        }
-                        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+                    let dicomFiles = collectDicomFiles(from: [selectedDir])
 
                     guard !dicomFiles.isEmpty else {
                         await MainActor.run {
@@ -1661,11 +2011,11 @@ struct ContentView: View {
                     }
 
                     print("[ContentView] UI test DICOM fixture dir resolved to \(selectedDir.path)")
-                    let seriesId = await dicomSeriesStore.register(files: dicomFiles)
-                    webViewManager.urlSchemeHandler.dicomSeriesStore = dicomSeriesStore
-
-                    let manifestURL = "niivue://app/dicom/\(seriesId)/niivue-manifest.txt"
                     do {
+                        let seriesId = await dicomSeriesStore.register(files: dicomFiles)
+                        webViewManager.urlSchemeHandler.dicomSeriesStore = dicomSeriesStore
+
+                        let manifestURL = "niivue://app/dicom/\(seriesId)/niivue-manifest.txt"
                         try await webViewManager.loadDicomSeriesFromManifestURL(manifestURL)
                         await MainActor.run {
                             dicomImportStatusMessage = "Loaded \(dicomFiles.count) DICOM file(s)."
@@ -1763,12 +2113,122 @@ struct ContentView: View {
                             }
                         }
                     } catch {
-                        await MainActor.run {
-                            let nsError = error as NSError
-                            print("[ContentView] DICOM fixture load failed: domain=\(nsError.domain) code=\(nsError.code) userInfo=\(nsError.userInfo)")
-                            let message = "Failed to load DICOM series (\(nsError.domain) \(nsError.code)): \(nsError.localizedDescription)"
-                            dicomImportStatusMessage = message
-                            webViewManager.lastErrorMessage = message
+                        do {
+                            await MainActor.run {
+                                let message = "JS/WASM conversion failed: \(error.localizedDescription). Falling back to native decode…"
+                                dicomImportStatusMessage = message
+                                webViewManager.lastJSLogLevel = "warn"
+                                webViewManager.lastJSLogMessage = "[DICOM] \(message)"
+                            }
+
+                            let output = try await convertDicomSeriesToNifti(directory: selectedDir, suggestedName: selectedDir.lastPathComponent)
+                            await webViewManager.importedFileStore.register(importedFile: output.imported)
+                            try await webViewManager.loadImageFromUrl(
+                                url: "niivue://app/files/\(output.imported.id)",
+                                fileName: output.imported.originalFileName
+                            )
+                            await MainActor.run {
+                                dicomImportStatusMessage = "Loaded DICOM series (\(output.width)×\(output.height)×\(output.depth)) via native decode."
+                            }
+
+                            if let segRelativeDir = uiTestSegRelativeDirectory {
+                                await MainActor.run {
+                                    segmentationImportInProgress = true
+                                    segmentationImportStatusMessage = "Loading segmentation fixture…"
+                                }
+
+                                defer {
+                                    Task { @MainActor in
+                                        segmentationImportInProgress = false
+                                    }
+                                }
+
+                                let segDocumentsDir = documentsDir.appendingPathComponent(segRelativeDir, isDirectory: true)
+                                let segBundleDir = Bundle.main.resourceURL?.appendingPathComponent(segRelativeDir, isDirectory: true)
+
+                                let segCandidateDirs: [(label: String, url: URL)] = {
+                                    var candidates: [(label: String, url: URL)] = [("Documents", segDocumentsDir)]
+                                    if let segBundleDir {
+                                        candidates.append(("Bundle", segBundleDir))
+                                    }
+                                    return candidates
+                                }()
+
+                                var selectedSegDir: URL?
+                                var lastSegReadError: Error?
+
+                                for candidate in segCandidateDirs {
+                                    do {
+                                        _ = try FileManager.default.contentsOfDirectory(
+                                            at: candidate.url,
+                                            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+                                            options: [.skipsHiddenFiles]
+                                        )
+                                        selectedSegDir = candidate.url
+                                        break
+                                    } catch {
+                                        lastSegReadError = error
+                                    }
+                                }
+
+                                guard let selectedSegDir else {
+                                    await MainActor.run {
+                                        let attempted = segCandidateDirs
+                                            .map { "\($0.label): \($0.url.path)" }
+                                            .joined(separator: " | ")
+                                        if let lastSegReadError {
+                                            segmentationImportStatusMessage = "Failed to read seg fixture dir (\(attempted)): \(lastSegReadError.localizedDescription)"
+                                        } else {
+                                            segmentationImportStatusMessage = "Failed to read seg fixture dir (\(attempted))."
+                                        }
+                                        webViewManager.lastErrorMessage = segmentationImportStatusMessage
+                                    }
+                                    return
+                                }
+
+                                let segFilesAll = collectSegmentationFiles(from: [selectedSegDir])
+                                let segFiles = Array(segFilesAll.prefix(uiTestSegLimit))
+
+                                guard !segFiles.isEmpty else {
+                                    await MainActor.run {
+                                        segmentationImportStatusMessage = "Failed: no segmentation files found in fixture dir."
+                                        webViewManager.lastErrorMessage = segmentationImportStatusMessage
+                                    }
+                                    return
+                                }
+
+                                var volumeSpecs: [(url: String, name: String)] = []
+                                for fileURL in segFiles {
+                                    let id = UUID().uuidString
+                                    let imported = FileImportService.ImportedFile(
+                                        id: id,
+                                        originalFileName: fileURL.lastPathComponent,
+                                        localURL: fileURL
+                                    )
+                                    await webViewManager.importedFileStore.register(importedFile: imported)
+                                    volumeSpecs.append((url: "niivue://app/files/\(id)", name: imported.originalFileName))
+                                }
+
+                                do {
+                                    try await webViewManager.addVolumesFromUrls(volumeSpecs)
+                                    await MainActor.run {
+                                        segmentationImportStatusMessage = "Loaded \(volumeSpecs.count) segmentation overlay(s)."
+                                    }
+                                } catch {
+                                    await MainActor.run {
+                                        let message = "Failed to load segmentation overlays: \(error.localizedDescription)"
+                                        segmentationImportStatusMessage = message
+                                        webViewManager.lastErrorMessage = message
+                                    }
+                                }
+                            }
+                        } catch {
+                            await MainActor.run {
+                                print("[ContentView] DICOM fixture load failed: \(String(describing: error))")
+                                let message = "Failed to load DICOM series: \(describeDicomSeriesLoaderError(error))"
+                                dicomImportStatusMessage = message
+                                webViewManager.lastErrorMessage = message
+                            }
                         }
                     }
                 } else {
@@ -2962,6 +3422,8 @@ struct ContentView: View {
                                     .accessibilityIdentifier("niivue.lastError")
                                 Text(webViewManager.lastJSLogMessage ?? "")
                                     .accessibilityIdentifier("niivue.lastJSLog")
+                                Text(webViewManager.lastURLSchemeDebugMessage ?? "")
+                                    .accessibilityIdentifier("niivue.lastURLSchemeDebug")
                                 Text("\(webViewManager.lastClickToSegmentApplyCount ?? 0)")
                                     .accessibilityIdentifier("niivue.clickToSegment.applyCount")
                                 Text(String(format: "%.0f", webViewManager.lastClickToSegmentDrawSum ?? 0))

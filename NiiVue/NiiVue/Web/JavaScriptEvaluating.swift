@@ -22,3 +22,31 @@ protocol JavaScriptEvaluating: AnyObject {
     /// Use this for Niivue APIs that return Promises (e.g., `saveImage`).
     func callAsyncString(_ functionBody: String) async throws -> String?
 }
+
+// MARK: - NiivueError wrappers
+
+extension JavaScriptEvaluating {
+    func evaluateCommandSafe(_ javaScript: String) async throws {
+        do {
+            try await evaluateCommand(javaScript)
+        } catch {
+            throw NiivueError.wrap(error, context: javaScript)
+        }
+    }
+
+    func evaluateStringSafe(_ javaScript: String) async throws -> String? {
+        do {
+            return try await evaluateString(javaScript)
+        } catch {
+            throw NiivueError.wrap(error, context: javaScript)
+        }
+    }
+
+    func callAsyncStringSafe(_ functionBody: String) async throws -> String? {
+        do {
+            return try await callAsyncString(functionBody)
+        } catch {
+            throw NiivueError.wrap(error, context: functionBody)
+        }
+    }
+}

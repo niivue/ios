@@ -20,6 +20,8 @@
 		34CD18132B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CD18122B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift */; };
 		A1B2C3D401234567ABCDEF01 /* JavaScriptQuote.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF02 /* JavaScriptQuote.swift */; };
 		A1B2C3D401234567ABCDEF03 /* JavaScriptEvaluating.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF04 /* JavaScriptEvaluating.swift */; };
+		E0E0E0E0E0E0E0E0E0E0E0F1 /* NiivueError.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0E0E0E0E0E0E0E0E0E0E0E1 /* NiivueError.swift */; };
+		E0E0E0E0E0E0E0E0E0E0E0F2 /* Task+Timeout.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0E0E0E0E0E0E0E0E0E0E0E2 /* Task+Timeout.swift */; };
 		A1B2C3D401234567ABCDEF05 /* WKWebView+JavaScriptEvaluating.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF06 /* WKWebView+JavaScriptEvaluating.swift */; };
 		A1B2C3D401234567ABCDEF07 /* WebViewManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF08 /* WebViewManager.swift */; };
 		A1B2C3D401234567ABCDEF09 /* JavaScriptQuoteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF0A /* JavaScriptQuoteTests.swift */; };
@@ -114,6 +116,8 @@
 		34CD18122B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiiVueUITestsLaunchTests.swift; sourceTree = "<group>"; };
 		A1B2C3D401234567ABCDEF02 /* JavaScriptQuote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavaScriptQuote.swift; sourceTree = "<group>"; };
 		A1B2C3D401234567ABCDEF04 /* JavaScriptEvaluating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavaScriptEvaluating.swift; sourceTree = "<group>"; };
+		E0E0E0E0E0E0E0E0E0E0E0E1 /* NiivueError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiivueError.swift; sourceTree = "<group>"; };
+		E0E0E0E0E0E0E0E0E0E0E0E2 /* Task+Timeout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Task+Timeout.swift"; sourceTree = "<group>"; };
 		A1B2C3D401234567ABCDEF06 /* WKWebView+JavaScriptEvaluating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WKWebView+JavaScriptEvaluating.swift"; sourceTree = "<group>"; };
 		A1B2C3D401234567ABCDEF08 /* WebViewManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewManager.swift; sourceTree = "<group>"; };
 		A1B2C3D401234567ABCDEF0A /* JavaScriptQuoteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavaScriptQuoteTests.swift; sourceTree = "<group>"; };
@@ -273,6 +277,8 @@
 			children = (
 				A1B2C3D401234567ABCDEF02 /* JavaScriptQuote.swift */,
 				A1B2C3D401234567ABCDEF04 /* JavaScriptEvaluating.swift */,
+				E0E0E0E0E0E0E0E0E0E0E0E1 /* NiivueError.swift */,
+				E0E0E0E0E0E0E0E0E0E0E0E2 /* Task+Timeout.swift */,
 				A1B2C3D401234567ABCDEF06 /* WKWebView+JavaScriptEvaluating.swift */,
 				A1B2C3D401234567ABCDEF08 /* WebViewManager.swift */,
 				D1E2F3A401234567ABCDEF02 /* NiivueURLRouter.swift */,
@@ -464,6 +470,8 @@
 					3487D3492BC85E5B007C6D7C /* ContentView.swift in Sources */,
 					A1B2C3D401234567ABCDEF01 /* JavaScriptQuote.swift in Sources */,
 					A1B2C3D401234567ABCDEF03 /* JavaScriptEvaluating.swift in Sources */,
+					E0E0E0E0E0E0E0E0E0E0E0F1 /* NiivueError.swift in Sources */,
+					E0E0E0E0E0E0E0E0E0E0E0F2 /* Task+Timeout.swift in Sources */,
 					A1B2C3D401234567ABCDEF05 /* WKWebView+JavaScriptEvaluating.swift in Sources */,
 					A1B2C3D401234567ABCDEF07 /* WebViewManager.swift in Sources */,
 					L1M2N3O401234567ABCDEF01 /* Base64FileEncoder.swift in Sources */,

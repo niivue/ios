@@ -56,6 +56,15 @@ actor DicomSeriesStore {
         return series[seriesId]?[fileName]
     }
 
+    /// Returns all file entries for a series in deterministic order.
+    /// Used for streaming/bundling endpoints.
+    func fileEntries(for seriesId: String) -> [(fileName: String, url: URL)] {
+        guard let fileMap = series[seriesId] else { return [] }
+        return fileMap
+            .sorted { $0.key < $1.key }
+            .map { (fileName: $0.key, url: $0.value) }
+    }
+
     /// Check if a series exists.
     /// - Parameter seriesId: The series identifier
     /// - Returns: True if the series is registered

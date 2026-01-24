@@ -33,8 +33,21 @@ struct FileImportService {
 
             try FileManager.default.createDirectory(at: entryDir, withIntermediateDirectories: true)
 
-            // Move (not copy) since tempURL is already a copy from asCopy: true
-            try FileManager.default.moveItem(at: tempURL, to: destURL)
+            if FileManager.default.fileExists(atPath: destURL.path) {
+                try FileManager.default.removeItem(at: destURL)
+            }
+
+            // For `asCopy: true` picks, the system typically provides a temp copy we can move.
+            // When selecting a folder, some providers may yield non-temp URLs; copy those instead.
+            if tempURL.path.hasPrefix(FileManager.default.temporaryDirectory.path) {
+                try FileManager.default.moveItem(at: tempURL, to: destURL)
+            } else {
+                let accessed = tempURL.startAccessingSecurityScopedResource()
+                defer {
+                    if accessed { tempURL.stopAccessingSecurityScopedResource() }
+                }
+                try FileManager.default.copyItem(at: tempURL, to: destURL)
+            }
 
             return ImportedFile(id: id, originalFileName: fileName, localURL: destURL)
         }.value

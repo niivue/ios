@@ -947,6 +947,9 @@ final class NiiVueUITests: XCTestCase {
         let jsLogLabel = app.staticTexts["niivue.lastJSLog"]
         XCTAssertTrue(jsLogLabel.waitForExistence(timeout: 30), "Expected JS log label to exist.")
 
+        let schemeDebugLabel = app.staticTexts["niivue.lastURLSchemeDebug"]
+        XCTAssertTrue(schemeDebugLabel.waitForExistence(timeout: 30), "Expected scheme debug label to exist.")
+
         // Wait for the app to be ready for commands.
         let readyDeadline = Date().addingTimeInterval(60)
         while Date() < readyDeadline {
@@ -971,8 +974,9 @@ final class NiiVueUITests: XCTestCase {
         let finalStatus = statusLabel.label
         let finalError = errorLabel.label
         let finalJSLog = jsLogLabel.label
+        let finalSchemeDebug = schemeDebugLabel.label
         let finalVolumeCount = Int(volumeCountLabel.label) ?? 0
-        print("[UI] DICOM final: status=\(finalStatus) error=\(finalError) jsLog=\(finalJSLog) volumeCount=\(finalVolumeCount)")
+        print("[UI] DICOM final: status=\(finalStatus) error=\(finalError) jsLog=\(finalJSLog) scheme=\(finalSchemeDebug) volumeCount=\(finalVolumeCount)")
 
         XCTAssertTrue(finalStatus.contains("Loaded"), "Expected DICOM series to load. status='\(finalStatus)' error='\(finalError)' jsLog='\(finalJSLog)'")
         XCTAssertGreaterThan(finalVolumeCount, 0, "Expected at least 1 loaded volume after DICOM import.")
@@ -1000,6 +1004,9 @@ final class NiiVueUITests: XCTestCase {
         let jsLogLabel = app.staticTexts["niivue.lastJSLog"]
         XCTAssertTrue(jsLogLabel.waitForExistence(timeout: 30), "Expected JS log label to exist.")
 
+        let schemeDebugLabel = app.staticTexts["niivue.lastURLSchemeDebug"]
+        XCTAssertTrue(schemeDebugLabel.waitForExistence(timeout: 30), "Expected scheme debug label to exist.")
+
         // Wait for the app to be ready for commands.
         let readyDeadline = Date().addingTimeInterval(60)
         while Date() < readyDeadline {
@@ -1012,7 +1019,8 @@ final class NiiVueUITests: XCTestCase {
         let volumeCountLabel = app.staticTexts["niivue.volumeCount"]
         XCTAssertTrue(volumeCountLabel.waitForExistence(timeout: 30), "Expected volume count label to exist.")
 
-        let deadline = Date().addingTimeInterval(240)
+        // JPEG-LS DICOM series conversion can take several minutes on-device.
+        let deadline = Date().addingTimeInterval(600)
         while Date() < deadline {
             let status = statusLabel.label
             let volumeCount = Int(volumeCountLabel.label) ?? 0
@@ -1024,8 +1032,9 @@ final class NiiVueUITests: XCTestCase {
         let finalStatus = statusLabel.label
         let finalError = errorLabel.label
         let finalJSLog = jsLogLabel.label
+        let finalSchemeDebug = schemeDebugLabel.label
         let finalVolumeCount = Int(volumeCountLabel.label) ?? 0
-        print("[UI] Geraldo DICOM final: status=\(finalStatus) error=\(finalError) jsLog=\(finalJSLog) volumeCount=\(finalVolumeCount)")
+        print("[UI] Geraldo DICOM final: status=\(finalStatus) error=\(finalError) jsLog=\(finalJSLog) scheme=\(finalSchemeDebug) volumeCount=\(finalVolumeCount)")
 
         XCTAssertTrue(finalStatus.contains("Loaded"), "Expected Geraldo DICOM series to load. status='\(finalStatus)' error='\(finalError)' jsLog='\(finalJSLog)'")
         XCTAssertGreaterThan(finalVolumeCount, 0, "Expected at least 1 loaded volume after Geraldo DICOM import.")
@@ -1064,7 +1073,8 @@ final class NiiVueUITests: XCTestCase {
         XCTAssertEqual(readyLabel.label, "ready")
 
         // Wait for base DICOM to load.
-        let dicomDeadline = Date().addingTimeInterval(240)
+        // JPEG-LS DICOM series conversion can take several minutes on-device.
+        let dicomDeadline = Date().addingTimeInterval(600)
         while Date() < dicomDeadline {
             let status = dicomStatusLabel.label
             let volumeCount = Int(volumeCountLabel.label) ?? 0
@@ -1075,7 +1085,7 @@ final class NiiVueUITests: XCTestCase {
         XCTAssertTrue(dicomStatusLabel.label.contains("Loaded"), "Expected DICOM to load before segmentation overlay. status='\(dicomStatusLabel.label)' error='\(errorLabel.label)'")
 
         // Then wait for at least one overlay to be added (volume count >= 2).
-        let overlayDeadline = Date().addingTimeInterval(240)
+        let overlayDeadline = Date().addingTimeInterval(600)
         while Date() < overlayDeadline {
             let segStatus = segStatusLabel.label
             let volumeCount = Int(volumeCountLabel.label) ?? 0

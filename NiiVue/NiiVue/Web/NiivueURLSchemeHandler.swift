@@ -19,6 +19,10 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
     /// Set this before the WebView starts making requests
     var importedFileStore: ImportedFileStore?
 
+    /// Optional debug callback for surfacing URL scheme activity to SwiftUI/UI tests.
+    /// This avoids relying on device console logs.
+    var onDebugUpdate: (@MainActor (String) -> Void)?
+
     /// DICOM series store for manifest and file serving
     /// Set this before the WebView starts making requests
     var dicomSeriesStore: DicomSeriesStore?
@@ -32,8 +36,13 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
         let task: Task<Void, Never>
     }
 
-    private let chunkSizeBytes = 64 * 1024
+    // Larger chunks drastically reduce main-thread hop overhead when serving many small files (e.g. DICOM slices).
+    // This improves throughput for JS `fetch()` over `WKURLSchemeHandler` without changing semantics.
+    private let chunkSizeBytes = 512 * 1024
     private var activeWork: [ObjectIdentifier: ActiveWork] = [:]
+    private var dicomManifestRequestCount = 0
+    private var dicomBundleRequestCount = 0
+    private var dicomFileRequestCount = 0
 
     enum HandlerError: Error {
         case invalidURL
@@ -71,9 +80,22 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
             serveImportedFile(id: id, task: urlSchemeTask)
 
         case .dicomManifest(let seriesId):
+            dicomManifestRequestCount += 1
+            if dicomManifestRequestCount <= 3 {
+                print("[NiivueURLSchemeHandler] DICOM manifest request \(dicomManifestRequestCount) seriesId=\(seriesId)")
+            }
             serveDicomManifest(seriesId: seriesId, task: urlSchemeTask)
 
+        case .dicomBundle(let seriesId):
+            dicomBundleRequestCount += 1
+            print("[NiivueURLSchemeHandler] DICOM bundle request \(dicomBundleRequestCount) seriesId=\(seriesId)")
+            serveDicomBundle(seriesId: seriesId, task: urlSchemeTask)
+
         case .dicomFile(let seriesId, let fileName):
+            dicomFileRequestCount += 1
+            if dicomFileRequestCount <= 3 || dicomFileRequestCount % 50 == 0 {
+                print("[NiivueURLSchemeHandler] DICOM file request \(dicomFileRequestCount) seriesId=\(seriesId) file=\(fileName)")
+            }
             serveDicomFile(seriesId: seriesId, fileName: fileName, task: urlSchemeTask)
 
         case .preprocessedVolume(let studyID, let itemID, let parametersHash, let fileName):
@@ -284,6 +306,116 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
         activeWork[taskID] = ActiveWork(token: token, task: work)
     }
 
+    private func serveDicomBundle(seriesId: String, task: WKURLSchemeTask) {
+        let taskID = ObjectIdentifier(task as AnyObject)
+        let token = UUID()
+        let requestStart = Date()
+
+        guard let store = dicomSeriesStore else {
+            task.didFailWithError(HandlerError.fileNotFound)
+            return
+        }
+
+        let requestURL = task.request.url!
+        let chunkSize = chunkSizeBytes
+
+        let work = Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                if Task.isCancelled { return }
+                var bytesSent: Int64 = 0
+                var nextProgressBytes: Int64 = 10 * 1024 * 1024
+
+                let entries = await store.fileEntries(for: seriesId)
+                guard !entries.isEmpty else {
+                    await MainActor.run { task.didFailWithError(HandlerError.fileNotFound) }
+                    return
+                }
+
+                await MainActor.run {
+                    self?.onDebugUpdate?("[Scheme] bundle start seriesId=\(seriesId) files=\(entries.count)")
+                }
+
+                let response = HTTPURLResponse(
+                    url: requestURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: [
+                        "Content-Type": "application/octet-stream"
+                    ]
+                )!
+
+                await MainActor.run { task.didReceive(response) }
+
+                var header = Data()
+                header.appendUInt32LE(UInt32(entries.count))
+                await MainActor.run { task.didReceive(header) }
+                bytesSent += Int64(header.count)
+
+                for entry in entries {
+                    if Task.isCancelled { return }
+
+                    let nameData = Data(entry.fileName.utf8)
+                    let fileSize = (try? entry.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+                    guard fileSize >= 0 else {
+                        await MainActor.run { task.didFailWithError(HandlerError.fileNotFound) }
+                        return
+                    }
+                    guard fileSize <= Int(UInt32.max) else {
+                        await MainActor.run { task.didFailWithError(HandlerError.notImplemented) }
+                        return
+                    }
+
+                    var fileHeader = Data()
+                    fileHeader.appendUInt32LE(UInt32(nameData.count))
+                    fileHeader.append(nameData)
+                    fileHeader.appendUInt32LE(UInt32(fileSize))
+
+                    await MainActor.run { task.didReceive(fileHeader) }
+                    bytesSent += Int64(fileHeader.count)
+
+                    let handle = try FileHandle(forReadingFrom: entry.url)
+                    defer { try? handle.close() }
+
+                    while !Task.isCancelled {
+                        let chunk = try handle.read(upToCount: chunkSize) ?? Data()
+                        if chunk.isEmpty { break }
+                        if Task.isCancelled { return }
+                        await MainActor.run { task.didReceive(chunk) }
+                        bytesSent += Int64(chunk.count)
+
+                        if bytesSent >= nextProgressBytes {
+                            let snapshot = bytesSent
+                            nextProgressBytes += 10 * 1024 * 1024
+                            await MainActor.run {
+                                self?.onDebugUpdate?("[Scheme] bundle progress seriesId=\(seriesId) bytes=\(snapshot)")
+                            }
+                        }
+                    }
+                }
+
+                if Task.isCancelled { return }
+                await MainActor.run { task.didFinish() }
+
+                let elapsed = Date().timeIntervalSince(requestStart)
+                print("[NiivueURLSchemeHandler] DICOM bundle served seriesId=\(seriesId) files=\(entries.count) bytes=\(bytesSent) elapsed=\(String(format: "%.2f", elapsed))s")
+                await MainActor.run {
+                    self?.onDebugUpdate?("[Scheme] bundle done seriesId=\(seriesId) bytes=\(bytesSent) elapsed=\(String(format: "%.2f", elapsed))s")
+                }
+            } catch {
+                if Task.isCancelled { return }
+                await MainActor.run { task.didFailWithError(error) }
+            }
+
+            await MainActor.run { [weak self] in
+                if self?.activeWork[taskID]?.token == token {
+                    self?.activeWork[taskID] = nil
+                }
+            }
+        }
+
+        activeWork[taskID] = ActiveWork(token: token, task: work)
+    }
+
     // MARK: - Preprocessed Volume Serving (Phase 2)
 
     private func servePreprocessedVolume(
@@ -358,6 +490,15 @@ final class NiivueURLSchemeHandler: NSObject, WKURLSchemeHandler {
             return "image/svg+xml"
         default:
             return "application/octet-stream"
+        }
+    }
+}
+
+private extension Data {
+    mutating func appendUInt32LE(_ value: UInt32) {
+        var le = value.littleEndian
+        Swift.withUnsafeBytes(of: &le) { buffer in
+            append(contentsOf: buffer)
         }
     }
 }

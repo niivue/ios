@@ -28,6 +28,10 @@ final class WebViewManager: NSObject, ObservableObject {
     /// Last log level received from the JS layer (e.g., "debug", "info", "warn", "error").
     @Published var lastJSLogLevel: String?
 
+    /// Last debug message emitted by the custom `niivue://` URL scheme handler.
+    /// This is useful for diagnosing large DICOM loads without relying on device console logs.
+    @Published var lastURLSchemeDebugMessage: String?
+
     /// Last CT adaptive preset analysis reported from JS (phase/window/colormap).
     @Published var lastCTPresetAnalysis: CTPresetAnalysis?
 
@@ -84,6 +88,20 @@ final class WebViewManager: NSObject, ObservableObject {
 
     /// UI test instrumentation: sum of drawing bitmap values after the last drawing operation (JS → Swift).
     @Published var lastDrawingDrawSum: Double?
+
+    // MARK: - DICOM Load Coordination (JS → Swift)
+
+    struct DicomLoadStatus: Codable, Equatable {
+        let requestId: Int
+        let ok: Bool
+        let elapsedMs: Double?
+        let error: String?
+    }
+
+    @Published var lastDicomLoadStatus: DicomLoadStatus?
+
+    private var nextDicomLoadRequestId: Int = 1
+    private var pendingDicomLoads: [Int: CheckedContinuation<Void, Error>] = [:]
 
     // MARK: - Volume Info
 
@@ -234,6 +252,9 @@ final class WebViewManager: NSObject, ObservableObject {
         // Task 12: Wire importedFileStore to URL scheme handler
         urlSchemeHandler.importedFileStore = importedFileStore
         urlSchemeHandler.preprocessedVolumeCache = PreprocessedVolumeCache()
+        urlSchemeHandler.onDebugUpdate = { [weak self] message in
+            self?.lastURLSchemeDebugMessage = message
+        }
 
         // Only configure the webView if we're not using a mock evaluator
         if evaluator == nil {
@@ -297,6 +318,7 @@ final class WebViewManager: NSObject, ObservableObject {
             lastErrorMessage = nil
             lastJSLogMessage = nil
             lastJSLogLevel = nil
+            lastURLSchemeDebugMessage = nil
             lastClickToSegmentApplyCount = nil
             lastClickToSegmentDrawSum = nil
             lastClickToSegmentVolumeMM3 = nil
@@ -410,6 +432,22 @@ final class WebViewManager: NSObject, ObservableObject {
                 return
             }
 
+            if let envelope = try? JSONDecoder().decode(UpdateUIEnvelope<DicomLoadStatus>.self, from: data),
+               envelope.type == "dicomLoad",
+               let payload = envelope.payload {
+                lastDicomLoadStatus = payload
+
+                if let pending = pendingDicomLoads.removeValue(forKey: payload.requestId) {
+                    if payload.ok {
+                        pending.resume()
+                    } else {
+                        let message = payload.error ?? "Unknown DICOM load error"
+                        pending.resume(throwing: NSError(domain: "NiiVue.DICOM", code: 2, userInfo: [NSLocalizedDescriptionKey: message]))
+                    }
+                }
+                return
+            }
+
             // Keep log noise low; most updateUI messages are for UI tests/debug only.
             // print("[WebViewManager] updateUI: \(body)")
 
@@ -478,6 +516,11 @@ final class WebViewManager: NSObject, ObservableObject {
     /// - resolved with `null` (bridges as `NSNull`)
     /// - rejected with a `String` (bridgable, deterministic failure reason)
     private func callAsyncVoid(_ awaitedCall: String) async throws {
+        guard isReady else {
+            lastErrorMessage = NiivueError.webViewNotReady.localizedDescription
+            throw NiivueError.webViewNotReady
+        }
+
         let functionBody = """
         try {
           \(awaitedCall)
@@ -486,7 +529,13 @@ final class WebViewManager: NSObject, ObservableObject {
           throw String(e);
         }
         """
-        _ = try await evaluator.callAsyncString(functionBody)
+        do {
+            _ = try await evaluator.callAsyncStringSafe(functionBody)
+        } catch {
+            let wrapped = NiivueError.wrap(error, context: awaitedCall)
+            lastErrorMessage = wrapped.localizedDescription
+            throw wrapped
+        }
     }
 
     /// Loads a base64-encoded image into Niivue.
@@ -847,26 +896,58 @@ final class WebViewManager: NSObject, ObservableObject {
     /// The manifest is a text file containing one DICOM filename per line.
     /// - Parameter manifestUrl: The manifest URL (e.g., niivue://app/dicom/series1/niivue-manifest.txt)
     func loadDicomSeriesFromManifestURL(_ manifestUrl: String) async throws {
+        lastErrorMessage = nil
         let urlEscaped = try JavaScriptQuote.jsonStringLiteral(manifestUrl)
-        // `callAsyncJavaScript` can throw `WKError.javaScriptResultTypeIsUnsupported` if the
-        // resolved value (or rejection reason) can't be bridged back to Swift.
-        //
-        // Wrap the call in `try/await` so synchronous failures (e.g., missing bridge function)
-        // are caught, and always:
-        // - resolve to `null` (bridges as `NSNull`)
-        // - reject with a `String` (bridgable, deterministic failure reason)
-        let functionBody = """
-        try {
-          if (typeof window.loadDicomSeriesFromManifest !== 'function') {
-            throw 'window.loadDicomSeriesFromManifest is not a function (typeof=' + (typeof window.loadDicomSeriesFromManifest) + ')';
-          }
-          await window.loadDicomSeriesFromManifest(\(urlEscaped));
-          return null;
-        } catch (e) {
-          throw String(e);
+
+        let requestId = nextDicomLoadRequestId
+        nextDicomLoadRequestId += 1
+        lastDicomLoadStatus = nil
+
+        // DICOM conversion can take several minutes on-device. Await the JS promise directly via
+        // `callAsyncJavaScript`, but force the resolved value to be a string so bridging is reliable.
+        let result = try await Task<String, Error>.withTimeout(
+            seconds: 600,
+            operation: "loadDicomSeriesFromManifestURL"
+        ) {
+            try await self.evaluator.callAsyncString(
+                """
+                try {
+                  await window.loadDicomSeriesFromManifest(\(urlEscaped), \(requestId));
+                  return "ok";
+                } catch (error) {
+                  let message = "";
+                  try {
+                    if (error && typeof error === "object" && "message" in error) {
+                      // @ts-ignore
+                      message = String(error.message);
+                    } else {
+                      message = String(error);
+                    }
+                  } catch (coercionError) {
+                    message = "Unknown error";
+                  }
+                  return "error:" + message;
+                }
+                """
+            )
         }
-        """
-        _ = try await evaluator.callAsyncString(functionBody)
+
+        guard let result else {
+            throw NiivueError.javaScriptPromiseRejected(
+                reason: "No result returned from JavaScript.",
+                script: "window.loadDicomSeriesFromManifest(\(manifestUrl), requestId=\(requestId))"
+            )
+        }
+
+        if result.hasPrefix("error:") {
+            throw NiivueError.javaScriptPromiseRejected(
+                reason: String(result.dropFirst("error:".count)),
+                script: "window.loadDicomSeriesFromManifest(\(manifestUrl), requestId=\(requestId))"
+            )
+        }
+
+        // Query Niivue's volume count to update our tracking (onImageLoaded callbacks may be deferred).
+        try await syncVolumeCount()
     }
 
     // MARK: - View Controls
