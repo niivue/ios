@@ -31,4 +31,37 @@ The Niivue iOS application is is primarily designed for iPhone and iPad, but it 
 
 ## Development - Getting Started
 
-TBD
+### Xcode
+
+- Open `NiiVue/NiiVue.xcodeproj`
+- Build/run on a physical device (the project’s test strategy assumes device-only for WebGL/WKWebView reliability)
+
+### Documentation
+
+- `docs/INDEX.md` — NiivueKit architecture + SPM package design docs
+- `00_START_HERE.txt` — Niivue API inventory overview (what’s wrapped vs missing)
+- `INTEGRATION_GUIDE.md` — Error handling + async patterns integration checklist
+
+### Device Fixtures (DICOM + Segmentations)
+
+Copy the local fixture folder into the app’s Documents container on a physical device:
+
+```bash
+scripts/copy-test-ct-volumes-to-device.sh <DEVICE_UDID>
+```
+
+Defaults:
+- `DEVICE_UDID=00008140-001664420413C01C` (Leandro’s iPhone)
+- `BUNDLE_ID=com.niivue.mobile`
+
+### On-Device UI Tests (no simulator)
+
+```bash
+xcodebuild test \
+  -project NiiVue/NiiVue.xcodeproj \
+  -scheme NiiVue \
+  -destination 'platform=iOS,id=<DEVICE_UDID>' \
+  -only-testing:NiiVueUITests \
+  -allowProvisioningUpdates \
+  -collect-test-diagnostics never
+```

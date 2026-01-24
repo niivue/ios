@@ -9,7 +9,7 @@ NiivueKit is a Swift SDK that wraps the Niivue neuroimaging visualization librar
 ## Documentation Files
 
 ### 1. SPM_PACKAGE_DESIGN.md (Main Design Document)
-**File:** `/Users/leandroalmeida/niivue-ios-foundation/docs/SPM_PACKAGE_DESIGN.md`
+**File:** `docs/SPM_PACKAGE_DESIGN.md`
 
 **Contents:**
 - Complete Package.swift configuration with detailed comments
@@ -33,7 +33,7 @@ NiivueKit is a Swift SDK that wraps the Niivue neuroimaging visualization librar
 ---
 
 ### 2. DIRECTORY_STRUCTURE.md (File Organization)
-**File:** `/Users/leandroalmeida/niivue-ios-foundation/docs/DIRECTORY_STRUCTURE.md`
+**File:** `docs/DIRECTORY_STRUCTURE.md`
 
 **Contents:**
 - Complete directory tree with explanations
@@ -52,7 +52,7 @@ NiivueKit is a Swift SDK that wraps the Niivue neuroimaging visualization librar
 ---
 
 ### 3. MIGRATION_CHECKLIST.md (Step-by-Step Migration)
-**File:** `/Users/leandroalmeida/niivue-ios-foundation/docs/MIGRATION_CHECKLIST.md`
+**File:** `docs/MIGRATION_CHECKLIST.md`
 
 **Contents:**
 - Phase-by-phase migration plan (9 phases)
@@ -75,7 +75,7 @@ NiivueKit is a Swift SDK that wraps the Niivue neuroimaging visualization librar
 ---
 
 ### 4. ARCHITECTURE_DIAGRAM.md (Visual Architecture)
-**File:** `/Users/leandroalmeida/niivue-ios-foundation/docs/ARCHITECTURE_DIAGRAM.md`
+**File:** `docs/ARCHITECTURE_DIAGRAM.md`
 
 **Contents:**
 - High-level architecture diagram (ASCII art)
@@ -97,7 +97,7 @@ NiivueKit is a Swift SDK that wraps the Niivue neuroimaging visualization librar
 ---
 
 ### 5. Package.swift (SPM Manifest)
-**File:** `/Users/leandroalmeida/niivue-ios-foundation/Package.swift`
+**File:** `Package.swift`
 
 **Contents:**
 - Swift tools version: 5.9
@@ -135,6 +135,18 @@ If you're **migrating** the existing Xcode project:
 2. Reference DIRECTORY_STRUCTURE.md for file placement
 3. Reference SPM_PACKAGE_DESIGN.md for design decisions
 4. Reference Package.swift for manifest configuration
+
+## Plans & Handoffs
+
+- `docs/handoff/2026-01-15-coreml-kidney-segmentation-handoff.md`
+- `docs/plans/2026-01-23-geraldo-dicom-seg-import-fix-plan.md`
+- `docs/plans/2026-01-15-kidney-colormap-auto-calibration-implementation-guide.md`
+
+## Generated Reports (Repo Root)
+
+- `../00_START_HERE.txt` (API inventory “start here”)
+- `../README_API_INVENTORY.md`, `../NIIVUE_API_INVENTORY.md`, `../API_INVENTORY.csv`
+- `../ERROR_HANDLING_INDEX.md` and `../INTEGRATION_GUIDE.md`
 
 ## Document Relationships
 

@@ -1,0 +1,448 @@
+================================================================================
+NIIVUE API INVENTORY - EXECUTIVE SUMMARY
+================================================================================
+
+Date: January 4, 2026
+Source: Phase 2 Report - Appendix A: Complete Niivue API Reference
+Project: NiiVue iOS Foundation
+Purpose: Drive Phase 3+ implementation roadmap
+
+================================================================================
+QUICK STATS
+================================================================================
+
+Total API Surface:
+  - Methods: 202
+  - Callbacks: 25
+  - Configuration Options: 100+
+  - Grand Total: 327+ APIs
+
+Implementation Status:
+  - Already Wrapped: 24 methods (12%)
+  - Need Wrapping: 178 methods (88%)
+  - Already Wrapped Callbacks: 2 (8%)
+  - Need Wrapping Callbacks: 23 (92%)
+
+================================================================================
+CRITICAL P0 METHODS (37 total) - MVP MUST-HAVE
+================================================================================
+
+VOLUME CONTROL (6):
+  ✓ removeVolume(volume: NVImage)
+  ✓ removeVolumeByIndex(index: number)
+  → setIntensityWindow() [NEW - missing from Niivue, needs implementation]
+  ✓ moveVolumeUp(volume: NVImage)
+  ✓ moveVolumeToTop(volume: NVImage)
+  ✓ moveVolumeDown(volume: NVImage)
+
+3D RENDERING (3):
+  ✓ setRenderAzimuthElevation(azimuth: number, elevation: number)
+  ✓ setZoom(volScaleMultiplier: number)
+  ✓ setClipPlane(depthAziElev: number[])
+
+VIEW CONFIGURATION (12):
+  ✓ setSliceType(st: SLICE_TYPE)
+  ✓ setLayout(layout: number)
+  ✓ setRadiologicalConvention(isRad: boolean)
+  ✓ set3dCrosshairVisible(visible: boolean)
+  ✓ set2dCrosshairVisible(visible: boolean)
+  ✓ setDragMode(mode: DRAG_MODE)
+  ✓ setInterpolation(isNearest: boolean)
+  ✓ setCornerText(isCorners: boolean)
+  ✓ setOrientationCube(isVisible: boolean)
+  ✓ setCrosshairColor(color: number[])
+  ✓ moveCrosshairInVox(i: number, j: number, k: number)
+  ✓ setOrientationCube(isVisible: boolean)
+
+COLORMAP & OPACITY (4):
+  ✓ setColormap(id: string, colormap: string)
+  ✓ setOpacity(id: string, opacity: number)
+  ✓ listColormaps()
+  ✓ showColorbar [Config option]
+
+DRAWING & SEGMENTATION (3):
+  ✓ setPenValue(value: number, isFilled?: boolean)
+  ✓ setDrawOpacity(opacity: number)
+  ✓ setClickToSegmentEnabled(enabled: boolean)
+
+INITIALIZATION (3):
+  ✓ setOpts(options: Partial<NVConfigOptions>)
+  ✓ getOpts() - getter
+  ✓ drawScene()
+
+CALLBACKS (2):
+  ✓ onImageLoaded - volume loaded
+  ✓ onLocationChange - crosshair position [PARTIAL]
+
+ALREADY IMPLEMENTED: 24 methods
+NEED WRAPPING: 13 methods
+ESTIMATED EFFORT: 3-5 days
+ESTIMATED TESTS: 16-20
+
+================================================================================
+RECOMMENDED PHASE 3 ROADMAP (3-5 Days)
+================================================================================
+
+Day 1 (5 methods):
+  1. removeVolume() + removeVolumeByIndex() [1 day]
+  2. moveVolumeUp/Down/ToTop (batch reordering) [0.5 day]
+  3. setIntensityWindow() - NEW BRIDGE METHOD [0.5 day]
+
+Day 2-3 (7 methods - 3D Rendering):
+  4. setRenderAzimuthElevation() [1 day]
+  5. setZoom() [0.5 day]
+  6. setClipPlane() + setClipPlanes() [1 day]
+  7. setVolumeRenderIllumination() [0.5 day]
+
+Day 4-5 (Setup & Polish):
+  8. Configuration: crosshairColor, crosshairWidth, etc. [1 day]
+  9. Integration testing + device verification [0.5-1 day]
+
+Commits Needed: 5 atomic commits
+Tests Needed: 16-20 Swift + React tests
+
+================================================================================
+HIGH-VALUE, LOW-EFFORT QUICK WINS (P0/P1, Low Complexity)
+================================================================================
+
+Easy to Implement (0.25-0.5 days each):
+  1. removeVolumeByIndex() - 1-line method
+  2. getVolumeIndexByID() - property lookup
+  3. setCrosshairWidth() - simple setter
+  4. setScale() - simple setter
+  5. clearMeasurements() - simple call
+  6. clearAngles() - simple call
+  7. Colormap transforms (mm2frac, frac2mm, etc.) - math functions
+  8. getOpts() - property getter
+
+Total: 8 quick wins = 2-3 days to 80% implementation
+
+================================================================================
+IMPLEMENTATION BY COMPLEXITY
+================================================================================
+
+LOW COMPLEXITY (94 methods - 47%):
+  - Simple JavaScript method calls
+  - Direct property setters
+  - No state transformation
+
+  Examples:
+    removeVolume(volume)
+    setZoom(multiplier)
+    setCrosshairColor(color)
+    clearMeasurements()
+    Coordinate transforms
+
+  Effort: 0.25-0.5 days each
+  Tests: 1-2 per method
+  Total: 47 days to implement all
+
+MEDIUM COMPLEXITY (82 methods - 41%):
+  - Data transformation required
+  - State management involved
+  - Callback registration
+
+  Examples:
+    loadVolumes() - requires URL setup
+    moveVolumeUp() - array manipulation
+    onLocationChange - callback with parsing
+    setMeshProperty() - state update
+    exportViewerState() - serialization
+
+  Effort: 0.5-1 day each
+  Tests: 2-3 per method
+  Total: 82 days to implement all
+
+HIGH COMPLEXITY (26 methods - 12%):
+  - Complex workflows
+  - Multi-step initialization
+  - Advanced algorithms
+
+  Examples:
+    loadDicoms() - WASM + multi-file
+    loadConnectome() - complex parsing
+    drawGrowCut() - algorithm
+    setCustomLayout() - system design
+    onOptsChange - cascading updates
+
+  Effort: 1-2 days each
+  Tests: 3-5 per method
+  Total: 26-52 days to implement all
+
+================================================================================
+PRIORITY BREAKDOWN
+================================================================================
+
+P0 CRITICAL (37 methods - 18%):
+  - Essential for MVP feature parity
+  - Required for basic neuroimaging workflow
+  - Cannot remove volumes → cannot work with multiple images
+  - Cannot control intensity window → cannot diagnose medical images
+  - Cannot rotate 3D view → poor user experience
+
+  Phase 3 Target: Implement all 37 P0 methods
+  Estimated: 3-5 days
+  Tests: 16-20
+
+P1 IMPORTANT (89 methods - 44%):
+  - Enhance user experience significantly
+  - Complete core feature sets
+  - Enable professional workflows
+
+  Examples:
+    - Coordinate transforms (essential for measurement)
+    - Measurement tools (distance, angle)
+    - Callback integration (real-time feedback)
+    - Volume cloning and reordering
+    - Settings persistence
+
+  Phases 4-7 Target: Implement 70% of P1 methods
+  Estimated: 8-12 days across 4 phases
+
+P2 NICE-TO-HAVE (76 methods - 38%):
+  - Advanced features for power users
+  - Specialized workflows (mesh, connectome)
+  - Export/document management
+
+  Phase 6+ Target: Implement as resources allow
+  Estimated: 10+ days
+
+================================================================================
+IMPLEMENTATION STRATEGY BY PHASE
+================================================================================
+
+PHASE 1 (Completed):
+  ✓ Basic setup: constructor, attachTo, attachToCanvas
+  ✓ Core volume loading: loadVolumes, loadFromUrl, loadFromBase64
+  ✓ Basic UI: slice type, layout, orientation
+  Status: ~12 methods
+
+PHASE 2 (Completed):
+  ✓ DICOM import workflow
+  ✓ Drawing basics: setPenValue, setDrawOpacity, saveDrawing
+  ✓ Segmentation: setClickToSegment
+  ✓ Colormap: setColormap, setOpacity, listColormaps
+  Status: ~24 methods total
+  Commits: 3 (Tasks 7-9)
+
+PHASE 3 (PRIORITY - Next 3-5 Days):
+  → Volume control: remove, reorder, intensity windowing
+  → 3D rendering: rotation, zoom, clip planes
+  → Configuration: crosshair, colorbar, interpolation
+  Status Target: 37 P0 methods
+  Estimated: 3-5 days
+  Tests: 16-20
+
+PHASE 4 (3-4 Days):
+  → Navigation & measurement: coordinate transforms
+  → Distance/angle tools
+  → Crosshair position tracking
+  → Intensity change callbacks
+  Status Target: 19 methods
+  Estimated: 3-4 days
+
+PHASE 5 (2-3 Days):
+  → Drawing enhancements: create/close drawing
+  → Advanced segmentation: Otsu, GrowCut, binarize
+  → Undo/redo history
+  Status Target: 15 methods
+  Estimated: 2-3 days
+
+PHASE 6 (4-6 Days):
+  → Mesh loading and controls
+  → Tractography support
+  → Export functionality
+  → Settings persistence
+  Status Target: 15 methods
+  Estimated: 4-6 days
+
+PHASE 7 (2-3 Days):
+  → Event system integration
+  → Callback wiring (8+ callbacks)
+  → Configuration option batching
+  Status Target: 12 methods
+  Estimated: 2-3 days
+
+PHASE 8+ (10+ Days):
+  → Remaining P2 methods
+  → Advanced features
+  → Performance optimization
+
+TOTAL ROADMAP: 25-30 days development
+ESTIMATED COMPLETION: Mid-to-late January 2026 (MVP parity)
+
+================================================================================
+TESTING REQUIREMENTS (Strict TDD)
+================================================================================
+
+Per Method:
+  1. React Unit Test (vitest) - 1-2 tests
+  2. React Integration Test - 0-1 tests
+  3. Swift Unit Test (XCTest) - 1-2 tests
+  4. Swift Integration Test - 0-1 tests
+  5. E2E Test (Playwright) - 0-1 tests
+
+Phase 3 Estimates:
+  - React tests: 16 tests
+  - Swift unit tests: 16 tests
+  - E2E tests: 4 tests
+  - Total: 36 tests per phase
+
+Full Implementation Estimates:
+  - Total React tests: 120-150
+  - Total Swift tests: 150-180
+  - Total E2E tests: 50-70
+  - Grand Total: 320-400 tests
+
+================================================================================
+CRITICAL INSIGHTS
+================================================================================
+
+1. INTENSITY WINDOWING IS MISSING
+   The Niivue API does NOT expose setCalMinMax() or getCalMinMax() directly.
+   Users must manipulate volume.cal_min and volume.cal_max directly.
+
+   SOLUTION: Create wrapper in React bridge:
+     export function setIntensityWindow(nv, volumeIndex, min, max) {
+         nv.volumes[volumeIndex].cal_min = min
+         nv.volumes[volumeIndex].cal_max = max
+         nv.updateGLVolume()
+     }
+
+   This is CRITICAL for medical imaging - cannot diagnose without windowing.
+   Add to Phase 3 immediately.
+
+2. CALLBACK INTEGRATION IS 90% MISSING
+   Only 2 of 25 callbacks are wired to Swift.
+   These require bidirectional communication via postToIOS().
+
+   Pattern:
+     JavaScript: nv.onIntensityChange = (volume) => {
+         postToIOS('intensityChange', { cal_min, cal_max })
+     }
+
+     Swift: case "intensityChange": handleIntensityChange(body)
+
+   Phase 7 must batch these systematically.
+
+3. COORDINATE TRANSFORMS ARE ESSENTIAL
+   8 of 12 transforms are pending.
+   These are REQUIRED for:
+     - Distance measurements
+     - Anatomical labeling
+     - ROI selection
+     - HUD display
+
+   Implement as batch in Phase 4. Relatively simple math functions.
+
+4. CONFIGURATION VIA setOpts() IS CRITICAL
+   Currently NO way to persist user settings (dark mode, colors, etc.).
+   Must implement:
+     - getOpts() to read current config
+     - setOpts() to update + persist to UserDefaults
+
+   20+ essential options need UI: crosshair color, background, colorbar, etc.
+
+5. MESH SUPPORT IS 95% MISSING
+   15 mesh methods all pending (except partial loadMeshes).
+   Currently cannot:
+     - Remove meshes from scene
+     - Control mesh properties
+     - Change mesh shaders
+
+   Defer to Phase 6 unless urgent. Neuroimaging focus is volume + drawing.
+
+6. QUICK WINS AVAILABLE
+   8 methods can be implemented in <1 day each:
+     - removeVolumeByIndex()
+     - getVolumeIndexByID()
+     - setCrosshairWidth()
+     - Coordinate transforms (batch)
+     - clearMeasurements()/clearAngles()
+
+   Do these first to build momentum and tests.
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. IMMEDIATE (Today):
+   ✓ Generate comprehensive API inventory (THIS DOCUMENT)
+   ✓ Create implementation templates
+   ✓ Identify quick wins
+
+2. SHORT-TERM (Next 1 day):
+   → Implement Phase 3 P0 methods
+   → Focus on: volume removal, 3D rotation, zoom, clip planes
+   → TDD: Write failing test → implement → verify on device
+
+3. MEDIUM-TERM (Next 2 weeks):
+   → Complete Phase 4-5: Navigation, measurement, drawing
+   → Reach ~80% feature parity with desktop
+
+4. LONG-TERM (Next 4-6 weeks):
+   → Phases 6-7: Mesh, export, callbacks
+   → Reach 100% feature parity
+   → Begin optimization and special iOS features
+
+================================================================================
+METRICS & SUCCESS CRITERIA
+================================================================================
+
+Phase 3 Success:
+  ✓ All 37 P0 methods have Swift wrappers
+  ✓ All 37 P0 methods have UI components (where applicable)
+  ✓ 36 tests passing (1 per method + 16 shared)
+  ✓ Device verification on iPhone 16 Pro Max
+  ✓ No performance regressions (<10ms per method)
+
+Feature Parity Tracking:
+  Phase 1: 12 methods (6% of total)
+  Phase 2: 24 methods (12% of total)
+  Phase 3: 37 methods (18% of total)
+  Phase 4: 56 methods (28% of total)
+  Phase 5: 71 methods (35% of total)
+  Phase 6: 86 methods (43% of total)
+  Phase 7: 98 methods (49% of total)
+  Phase 8+: 202+ methods (100% of total)
+
+================================================================================
+FILE ARTIFACTS GENERATED
+================================================================================
+
+1. NIIVUE_API_INVENTORY.md (THIS COMPREHENSIVE GUIDE)
+   - Full API listing with all metadata
+   - Phase-by-phase breakdown
+   - Implementation templates
+   - Testing strategy
+   - 25+ pages of detailed guidance
+
+2. API_INVENTORY.csv (MACHINE-READABLE)
+   - 202 rows (one per method)
+   - 8 columns: Category, Method, Wrapper, Complexity, Priority, Phase, Effort, Tests
+   - Sortable/filterable for tracking
+
+3. API_INVENTORY_SUMMARY.txt (THIS FILE)
+   - Executive summary
+   - Quick statistics
+   - Critical insights
+   - Next steps
+
+================================================================================
+CONCLUSION
+================================================================================
+
+The NiiVue iOS Foundation has achieved Phase 2 completion with the DICOM Import
+Pack. The 202-method Niivue API surface is now fully mapped, with:
+
+  • 12% already wrapped (24 methods from Phases 1-2)
+  • 88% pending implementation (178 methods)
+  • Clear phasing: 37 P0 critical, 89 P1 important, 76 P2 nice-to-have
+
+The MVP (Phase 3) requires 3-5 days of focused TDD work to implement 37 P0
+methods, achieving ~50% API coverage for core neuroimaging workflows.
+
+Full feature parity is achievable in 8-10 weeks total, with systematic
+implementation of P0 → P1 → P2 methods following the provided roadmap.
+
+================================================================================

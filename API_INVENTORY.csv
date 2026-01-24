@@ -1,0 +1,176 @@
+Category,Method,Swift Wrapper Needed,Complexity,Priority,Phase,Phase Name,Effort (Days),Estimated Tests
+Initialization,constructor,No (Via React),High,P0,2,Completed,0,0
+Initialization,attachTo,No (Via React),High,P0,2,Completed,0,0
+Initialization,attachToCanvas,No (Via React),High,P0,2,Completed,0,0
+Initialization,setOpts,Yes,Medium,P0,3,Core Volume,1,2
+Initialization,getOpts,Yes,Medium,P1,7,Event System,0.5,1
+Initialization,resize,No (Automatic),Low,P1,3,Core Volume,0,0
+Initialization,dispose,Yes,Medium,P2,6,Advanced,0.5,1
+Initialization,drawScene,Yes,Low,P1,3,Core Volume,0.25,1
+Volume Loading,loadVolumes,Partial,Medium,P0,2,Completed,0,0
+Volume Loading,loadFromUrl,Partial,Medium,P0,2,Completed,0,0
+Volume Loading,loadFromFile,Partial,Medium,P0,2,Completed,0,0
+Volume Loading,loadFromBase64,Partial,Medium,P0,2,Completed,0,0
+Volume Loading,addVolumesFromUrl,Partial,Medium,P0,2,Completed,0,0
+Volume Loading,loadDicoms,Partial,Medium,P0,2,Completed,0,0
+Volume Loading,removeVolume,Yes,Low,P0,3,Core Volume,0.5,2
+Volume Loading,removeVolumeByIndex,Yes,Low,P0,3,Core Volume,0.5,2
+Volume Loading,removeVolumeByUrl,Yes,Low,P1,3,Core Volume,0.25,1
+Volume Loading,setVolume,Yes,Low,P1,3,Core Volume,0.5,1
+Volume Loading,moveVolumeToTop,Yes,Low,P1,3,Core Volume,0.5,2
+Volume Loading,moveVolumeToBottom,Yes,Low,P2,6,Advanced,0.25,1
+Volume Loading,moveVolumeUp,Yes,Low,P1,3,Core Volume,0.5,2
+Volume Loading,moveVolumeDown,Yes,Low,P1,3,Core Volume,0.5,2
+Volume Loading,cloneVolume,Yes,Medium,P2,6,Advanced,0.5,2
+Volume Loading,getVolumeIndexByID,Yes,Low,P1,3,Core Volume,0.25,1
+Volume Loading,updateGLVolume,No (Internal),Low,N/A,N/A,N/A,0,0
+Volume Loading,refreshVolumes,Yes,Low,P1,3,Core Volume,0.25,1
+Mesh Loading,loadMeshes,Yes,Medium,P2,6,Advanced,1,2
+Mesh Loading,addMesh,Yes,Medium,P2,6,Advanced,0.5,1
+Mesh Loading,addMeshFromUrl,Yes,Medium,P2,6,Advanced,0.5,2
+Mesh Loading,removeMesh,Yes,Low,P2,6,Advanced,0.25,1
+Mesh Loading,removeMeshByUrl,Yes,Low,P2,6,Advanced,0.25,1
+Mesh Loading,setMesh,Yes,Low,P2,6,Advanced,0.5,1
+Mesh Loading,getMeshIndexByID,Yes,Low,P2,6,Advanced,0.25,1
+Mesh Loading,setMeshProperty,Yes,Medium,P2,6,Advanced,0.5,2
+Mesh Loading,setMeshLayerProperty,Yes,Medium,P2,6,Advanced,0.5,1
+Mesh Loading,setMeshShader,Yes,Low,P2,6,Advanced,0.5,2
+Mesh Loading,meshShaderNames,Yes,Low,P2,6,Advanced,0.25,1
+Mesh Loading,reverseFaces,Yes,Low,P2,6,Advanced,0.25,1
+Mesh Loading,loadConnectome,Yes,High,P2,6,Advanced,1.5,3
+Mesh Loading,loadConnectomeFromUrl,Yes,High,P2,6,Advanced,1.5,3
+Mesh Loading,loadFreeSurferConnectome,Yes,High,P2,6,Advanced,1.5,3
+Drawing,setPenValue,Partial,Low,P0,2,Completed,0,0
+Drawing,setDrawOpacity,Partial,Low,P0,2,Completed,0,0
+Drawing,setDrawColormap,Partial,Low,P0,2,Completed,0,0
+Drawing,createEmptyDrawing,Yes,Low,P1,5,Drawing & Segmentation,0.5,1
+Drawing,closeDrawing,Yes,Low,P1,5,Drawing & Segmentation,0.5,1
+Drawing,loadDrawing,Yes,Medium,P2,6,Advanced,0.5,2
+Drawing,loadDrawingFromUrl,Yes,Medium,P2,6,Advanced,0.5,2
+Drawing,saveDrawing,Partial,Medium,P0,2,Completed,0,0
+Drawing,drawUndo,Partial,Low,P0,2,Completed,0,0
+Drawing,drawPt,No (Internal),Low,N/A,N/A,N/A,0,0
+Drawing,drawPenLine,No (Internal),Low,N/A,N/A,N/A,0,0
+Drawing,drawRectangleMask,No (Internal),Low,N/A,N/A,N/A,0,0
+Drawing,drawEllipseMask,No (Internal),Low,N/A,N/A,N/A,0,0
+Drawing,drawFloodFill,No (Internal),Low,N/A,N/A,N/A,0,0
+Drawing,drawOtsu,Yes,High,P2,5,Drawing & Segmentation,1,3
+Drawing,drawGrowCut,Yes,High,P2,5,Drawing & Segmentation,1,3
+Drawing,findOtsu,Yes,Medium,P2,5,Drawing & Segmentation,0.5,2
+Drawing,removeHaze,Yes,Medium,P2,5,Drawing & Segmentation,0.5,2
+Drawing,binarize,Yes,Medium,P2,5,Drawing & Segmentation,0.5,2
+Drawing,drawClearAllUndoBitmaps,Yes,Low,P2,5,Drawing & Segmentation,0.25,1
+Drawing,setClickToSegmentEnabled,Partial,Low,P0,2,Completed,0,0
+View Control,setSliceType,Partial,Low,P0,2,Completed,0,0
+View Control,setRenderAzimuthElevation,Yes,Low,P0,3,Core Volume,0.5,2
+View Control,setClipPlane,Yes,Low,P1,3,Core Volume,0.75,2
+View Control,setClipPlanes,Yes,Low,P1,3,Core Volume,0.5,1
+View Control,setClipPlaneColor,Yes,Low,P2,6,Advanced,0.25,1
+View Control,setPan2Dxyzmm,Yes,Medium,P1,4,Navigation & Measurement,0.5,2
+View Control,setZoom,Yes,Low,P0,3,Core Volume,0.5,2
+View Control,moveCrosshairInVox,Partial,Low,P0,2,Completed,0,0
+View Control,setCrosshairColor,Partial,Low,P0,2,Completed,0,0
+View Control,setCrosshairWidth,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+View Control,setInterpolation,Yes,Low,P0,3,Core Volume,0.5,2
+View Control,setAtlasOutline,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+View Control,setGamma,Yes,Low,P1,4,Navigation & Measurement,0.5,2
+View Control,setScale,Yes,Low,P2,6,Advanced,0.25,1
+View Control,setLayout,Partial,Low,P0,2,Completed,0,0
+View Control,setRadiologicalConvention,Partial,Low,P0,2,Completed,0,0
+View Control,setCornerText,Partial,Low,P0,2,Completed,0,0
+View Control,setOrientationCube,Partial,Low,P0,2,Completed,0,0
+View Control,set3dCrosshairVisible,Partial,Low,P0,2,Completed,0,0
+View Control,set2dCrosshairVisible,Partial,Low,P0,2,Completed,0,0
+View Control,setDragMode,Partial,Low,P0,2,Completed,0,0
+View Control,setVolumeRenderIllumination,Yes,Low,P1,4,Navigation & Measurement,0.5,2
+View Control,setGradientOpacity,Yes,Low,P1,4,Navigation & Measurement,0.5,2
+View Control,setCustomLayout,Yes,High,P2,6,Advanced,1.5,3
+View Control,clearCustomLayout,Yes,Low,P2,6,Advanced,0.25,1
+View Control,setSliceMM,Yes,Low,P2,6,Advanced,0.25,1
+View Control,setAdditiveBlend,Yes,Low,P1,4,Navigation & Measurement,0.5,2
+View Control,setHeroImage,Yes,Medium,P2,6,Advanced,0.5,2
+View Control,setMultiplanarPadPixels,Yes,Low,P2,6,Advanced,0.25,1
+View Control,setSelectionBoxColor,Yes,Low,P2,6,Advanced,0.25,1
+Colormap,setColormap,Partial,Low,P0,2,Completed,0,0
+Colormap,setColormapNegative,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Colormap,setColormapLabel,Yes,Medium,P2,6,Advanced,0.5,2
+Colormap,setOpacity,Partial,Low,P0,2,Completed,0,0
+Colormap,listColormaps,Partial,Low,P0,2,Completed,0,0
+Colormap,setModulationImage,Yes,Medium,P2,6,Advanced,0.5,2
+Colormap,refreshColormaps,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Colormap,colormapFromKey,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Colormap,addColormap,Yes,Medium,P2,6,Advanced,0.5,2
+Colormap,removeColormap,Yes,Low,P2,6,Advanced,0.25,1
+Colormap,setColormapInvert,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Measurement,clearMeasurements,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Measurement,clearAngles,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Measurement,clearAllMeasurements,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Measurement,getDescriptives,Yes,Medium,P1,4,Navigation & Measurement,0.5,2
+Measurement,drawMeasurementTool,No (Internal),Low,N/A,N/A,N/A,0,0
+Measurement,drawAngleMeasurementTool,No (Internal),Low,N/A,N/A,N/A,0,0
+Measurement,calculateAngleBetweenLines,No (Internal),Low,N/A,N/A,N/A,0,0
+Measurement,drawLine,No (Internal),Low,N/A,N/A,N/A,0,0
+Measurement,drawText,No (Internal),Low,N/A,N/A,N/A,0,0
+Measurement,drawTextBetween,No (Internal),Low,N/A,N/A,N/A,0,0
+Export,json,Yes,Medium,P1,7,Event System,0.5,2
+Export,loadDocument,Yes,High,P2,6,Advanced,1,2
+Export,loadDocumentFromUrl,Yes,High,P2,6,Advanced,1,2
+Export,saveDocument,Yes,Medium,P2,6,Advanced,0.75,2
+Export,saveScene,Yes,Medium,P2,6,Advanced,0.5,2
+Export,saveImage,Yes,Medium,P2,6,Advanced,0.75,2
+Export,generateHTML,Yes,High,P2,6,Advanced,1,2
+Export,exportViewerState,Partial,Medium,P0,2,Completed,0,0
+Events,onLocationChange,Partial,Medium,P1,4,Navigation & Measurement,0.5,2
+Events,onImageLoaded,Partial,Low,P0,2,Completed,0,0
+Events,onMeshLoaded,Yes,Low,P2,6,Advanced,0.5,2
+Events,onIntensityChange,Yes,Medium,P1,7,Event System,0.5,2
+Events,onFrameChange,Yes,Medium,P1,7,Event System,0.5,2
+Events,onAzimuthElevationChange,Yes,Medium,P1,7,Event System,0.5,2
+Events,onClipPlaneChange,Yes,Medium,P1,7,Event System,0.5,2
+Events,onClickToSegment,Yes,Medium,P1,7,Event System,0.5,2
+Events,onMouseUp,Yes,Medium,P2,6,Advanced,0.5,2
+Events,onDragRelease,Yes,Medium,P2,6,Advanced,0.5,2
+Events,onVolumeAddedFromUrl,Yes,Medium,P1,7,Event System,0.5,2
+Events,onMeshAddedFromUrl,Yes,Medium,P2,6,Advanced,0.5,2
+Events,onVolumeWithUrlRemoved,Yes,Low,P1,7,Event System,0.25,1
+Events,onMeshWithUrlRemoved,Yes,Low,P2,6,Advanced,0.25,1
+Events,onVolumeUpdated,Yes,Low,P1,7,Event System,0.25,1
+Events,onColormapChange,Yes,Low,P1,7,Event System,0.25,1
+Events,onDocumentLoaded,Yes,Medium,P2,6,Advanced,0.5,2
+Events,onOptsChange,Yes,High,P2,6,Advanced,1,3
+Events,onZoom3DChange,Yes,Medium,P1,7,Event System,0.5,2
+Events,onMeshShaderChanged,Yes,Low,P2,6,Advanced,0.25,1
+Events,onMeshPropertyChanged,Yes,Medium,P2,6,Advanced,0.5,2
+Events,onError,Yes,Medium,P1,7,Event System,0.5,2
+Events,onInfo,Yes,Low,P2,6,Advanced,0.25,1
+Events,onWarn,Yes,Low,P2,6,Advanced,0.25,1
+Events,onDebug,Yes,Low,P2,6,Advanced,0.25,1
+Coordinates,mm2frac,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Coordinates,frac2mm,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Coordinates,vox2frac,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Coordinates,frac2vox,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Coordinates,canvasPos2frac,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Coordinates,frac2canvasPos,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Coordinates,screenXY2mm,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Coordinates,screenXY2TextureFrac,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Coordinates,sph2cartDeg,No (Internal),Low,N/A,N/A,N/A,0,0
+Coordinates,head2mm,No (Internal),Low,N/A,N/A,N/A,0,0
+Coordinates,getMMfromSlice,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Coordinates,getSliceFromMM,Yes,Low,P1,4,Navigation & Measurement,0.25,1
+Configuration,crosshairColor,Yes,Low,P1,7,Event System,0.25,1
+Configuration,crosshairWidth,Yes,Low,P1,7,Event System,0.25,1
+Configuration,show3Dcrosshair,Yes,Low,P1,7,Event System,0.25,1
+Configuration,backColor,Yes,Low,P1,7,Event System,0.25,1
+Configuration,isColorbar,Yes,Low,P0,2,Completed,0,0
+Configuration,isRuler,Yes,Low,P1,7,Event System,0.25,1
+Configuration,isRadiologicalConvention,Yes,Low,P0,2,Completed,0,0
+Configuration,isNearestInterpolation,Yes,Low,P0,2,Completed,0,0
+Configuration,textHeight,Yes,Low,P2,6,Advanced,0.25,1
+Configuration,multiplanarLayout,Yes,Low,P1,7,Event System,0.25,1
+Configuration,showRender,Yes,Low,P1,7,Event System,0.25,1
+Configuration,isSliceBlackBackground,Yes,Low,P2,6,Advanced,0.25,1
+Configuration,isOrientationCube,Yes,Low,P0,2,Completed,0,0
+Configuration,isCornerMarkers,Yes,Low,P0,2,Completed,0,0
+Configuration,isGradientEditable,Yes,Low,P2,6,Advanced,0.25,1
+Configuration,isAdditiveBlend,Yes,Low,P1,7,Event System,0.25,1
+Configuration,showColorbar,Yes,Low,P0,2,Completed,0,0
