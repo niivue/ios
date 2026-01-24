@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		3485664D2B5426A4008EF4DD /* dist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 3485664C2B5426A4008EF4DD /* dist */; };
+		C0FFEE0D1C0FFEE0D1C0FFF0 /* Test_CT_DICOM_volumes in CopyFiles */ = {isa = PBXBuildFile; fileRef = C0FFEE0D1C0FFEE0D1C0FFEF /* Test_CT_DICOM_volumes */; };
 		3487D3492BC85E5B007C6D7C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3487D3482BC85E5B007C6D7C /* ContentView.swift */; };
 		3487D34F2BCFD932007C6D7C /* SharedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3487D34E2BCFD932007C6D7C /* SharedData.swift */; };
 		34C48D4F2BF297FD00486C4E /* samples in CopyFiles */ = {isa = PBXBuildFile; fileRef = 34C48D4E2BF297FD00486C4E /* samples */; };
@@ -17,7 +18,51 @@
 		34CD18072B45C5420015EF4C /* NiiVueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CD18062B45C5420015EF4C /* NiiVueTests.swift */; };
 		34CD18112B45C5420015EF4C /* NiiVueUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CD18102B45C5420015EF4C /* NiiVueUITests.swift */; };
 		34CD18132B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CD18122B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift */; };
-/* End PBXBuildFile section */
+		A1B2C3D401234567ABCDEF01 /* JavaScriptQuote.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF02 /* JavaScriptQuote.swift */; };
+		A1B2C3D401234567ABCDEF03 /* JavaScriptEvaluating.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF04 /* JavaScriptEvaluating.swift */; };
+		E0E0E0E0E0E0E0E0E0E0E0F1 /* NiivueError.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0E0E0E0E0E0E0E0E0E0E0E1 /* NiivueError.swift */; };
+		E0E0E0E0E0E0E0E0E0E0E0F2 /* Task+Timeout.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0E0E0E0E0E0E0E0E0E0E0E2 /* Task+Timeout.swift */; };
+		A1B2C3D401234567ABCDEF05 /* WKWebView+JavaScriptEvaluating.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF06 /* WKWebView+JavaScriptEvaluating.swift */; };
+		A1B2C3D401234567ABCDEF07 /* WebViewManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF08 /* WebViewManager.swift */; };
+		A1B2C3D401234567ABCDEF09 /* JavaScriptQuoteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF0A /* JavaScriptQuoteTests.swift */; };
+		A1B2C3D401234567ABCDEF0B /* MockJavaScriptEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF0C /* MockJavaScriptEvaluator.swift */; };
+		A1B2C3D401234567ABCDEF0D /* JavaScriptEvaluatingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF0E /* JavaScriptEvaluatingTests.swift */; };
+		A1B2C3D401234567ABCDEF0F /* WebViewManagerCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D401234567ABCDEF10 /* WebViewManagerCommandTests.swift */; };
+		B1C2D3E401234567ABCDEF01 /* DrawingExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E401234567ABCDEF02 /* DrawingExportService.swift */; };
+		B1C2D3E401234567ABCDEF03 /* DrawingExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E401234567ABCDEF04 /* DrawingExportServiceTests.swift */; };
+		B1C2D3E401234567ABCDEF05 /* WebViewManagerStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E401234567ABCDEF06 /* WebViewManagerStateTests.swift */; };
+		C1D2E3F401234567ABCDEF01 /* FileImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D2E3F401234567ABCDEF02 /* FileImportService.swift */; };
+		C1D2E3F401234567ABCDEF03 /* FileImportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D2E3F401234567ABCDEF04 /* FileImportServiceTests.swift */; };
+		D1E2F3A401234567ABCDEF01 /* NiivueURLRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E2F3A401234567ABCDEF02 /* NiivueURLRouter.swift */; };
+		D1E2F3A401234567ABCDEF03 /* NiivueURLSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E2F3A401234567ABCDEF04 /* NiivueURLSchemeHandler.swift */; };
+		D1E2F3A401234567ABCDEF05 /* NiivueURLRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E2F3A401234567ABCDEF06 /* NiivueURLRouterTests.swift */; };
+		E1F2A3B401234567ABCDEF01 /* ImportedFileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */; };
+		K1L2M3N401234567ABCDEF01 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = K1L2M3N401234567ABCDEF02 /* SessionStore.swift */; };
+		F1A2B3C401234567ABCDEF01 /* HUDMessageParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */; };
+		G1H2I3J401234567ABCDEF01 /* OverlayCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */; };
+		H1I2J3K401234567ABCDEF01 /* TimeSeriesCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */; };
+		I1J2K3L401234567ABCDEF01 /* SegmentationCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = I1J2K3L401234567ABCDEF02 /* SegmentationCommandTests.swift */; };
+		J1K2L3M401234567ABCDEF01 /* SessionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = J1K2L3M401234567ABCDEF02 /* SessionStoreTests.swift */; };
+		L1M2N3O401234567ABCDEF01 /* Base64FileEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = L1M2N3O401234567ABCDEF02 /* Base64FileEncoder.swift */; };
+		M1N2O3P401234567ABCDEF01 /* SessionSnapshotV1.swift in Sources */ = {isa = PBXBuildFile; fileRef = M1N2O3P401234567ABCDEF02 /* SessionSnapshotV1.swift */; };
+		N1O2P3Q401234567ABCDEF01 /* Base64FileEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = N1O2P3Q401234567ABCDEF02 /* Base64FileEncoderTests.swift */; };
+		O1P2Q3R401234567ABCDEF01 /* DicomSeriesStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = O1P2Q3R401234567ABCDEF02 /* DicomSeriesStoreTests.swift */; };
+		P1Q2R3S401234567ABCDEF01 /* DicomSeriesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */; };
+		Q1R2S3T401234567ABCDEF01 /* DicomCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = Q1R2S3T401234567ABCDEF02 /* DicomCommandTests.swift */; };
+		05FA761B8C45710BE98CADFB /* CTPresetServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76E2A5095D83C725AF9B05BB /* CTPresetServiceTests.swift */; };
+		44E00797F804C49BC5C3E7AE /* CTPresetService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C2C8CD003E4BE0DA0797E0E /* CTPresetService.swift */; };
+		3627108DB23D41C1AA3439A1 /* CTPreprocessingParameters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79259EF8530D4549859B05F3 /* CTPreprocessingParameters.swift */; };
+		3BC590A86410462F9A850254 /* PreprocessedVolumeCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEC70358F3BC4A799E9D2D83 /* PreprocessedVolumeCache.swift */; };
+		490FFFC9A0BE4E6785976839 /* PreprocessingContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C6956F96284A15BF444606 /* PreprocessingContext.swift */; };
+		B8F1019AF3A0ABBD9A30630A /* NiftiWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6012792540A2396CAD130B6F /* NiftiWriter.swift */; };
+		A26D1CF0DFEB550B4F51E8FB /* PreprocessingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16729CBDBCA997F983DF52F2 /* PreprocessingService.swift */; };
+		755DC56C68CE45C080C4ADF3 /* CTPreprocessingParametersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF37BABDC367406DAF93D740 /* CTPreprocessingParametersTests.swift */; };
+		C654B1DD5F4343A7A1AF2A6C /* PreprocessedVolumeCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EA7243442C845C5A0F85F73 /* PreprocessedVolumeCacheTests.swift */; };
+		7B277BD1E89B2E8651C25D81 /* NiftiWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D3FA576CD8C6026F28389A9 /* NiftiWriterTests.swift */; };
+		3DDEE989ADCF1025C7031189 /* PreprocessingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85C9DC972891B2ED0FE5BB06 /* PreprocessingServiceTests.swift */; };
+		0C2CFF4D1CD44F9F8A51F41B /* PreprocessingContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F969D36DDE464C1DBB79526B /* PreprocessingContextTests.swift */; };
+		9FD68E87FCC14B0B91057700 /* nnUNetPreprocessing in Frameworks */ = {isa = PBXBuildFile; productRef = 7F9CAC282DA440BFB12FCED8 /* nnUNetPreprocessing */; };
+	/* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		34CD18032B45C5420015EF4C /* PBXContainerItemProxy */ = {
@@ -45,6 +90,7 @@
 			files = (
 				34C48D4F2BF297FD00486C4E /* samples in CopyFiles */,
 				3485664D2B5426A4008EF4DD /* dist in CopyFiles */,
+				C0FFEE0D1C0FFEE0D1C0FFF0 /* Test_CT_DICOM_volumes in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -58,6 +104,7 @@
 		3487D34D2BCB2250007C6D7C /* NiiVue.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NiiVue.entitlements; sourceTree = "<group>"; };
 		3487D34E2BCFD932007C6D7C /* SharedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedData.swift; sourceTree = "<group>"; };
 		34C48D4E2BF297FD00486C4E /* samples */ = {isa = PBXFileReference; lastKnownFileType = folder; name = samples; path = NiiVue/samples; sourceTree = "<group>"; };
+		C0FFEE0D1C0FFEE0D1C0FFEF /* Test_CT_DICOM_volumes */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Test_CT_DICOM_volumes; path = ../Test_CT_DICOM_volumes; sourceTree = "<group>"; };
 		34CD17F22B45C5400015EF4C /* NiiVue.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NiiVue.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		34CD17F52B45C5400015EF4C /* NiiVueApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiiVueApp.swift; sourceTree = "<group>"; };
 		34CD17F92B45C5410015EF4C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -67,13 +114,57 @@
 		34CD180C2B45C5420015EF4C /* NiiVueUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NiiVueUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		34CD18102B45C5420015EF4C /* NiiVueUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiiVueUITests.swift; sourceTree = "<group>"; };
 		34CD18122B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiiVueUITestsLaunchTests.swift; sourceTree = "<group>"; };
-/* End PBXFileReference section */
+		A1B2C3D401234567ABCDEF02 /* JavaScriptQuote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavaScriptQuote.swift; sourceTree = "<group>"; };
+		A1B2C3D401234567ABCDEF04 /* JavaScriptEvaluating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavaScriptEvaluating.swift; sourceTree = "<group>"; };
+		E0E0E0E0E0E0E0E0E0E0E0E1 /* NiivueError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiivueError.swift; sourceTree = "<group>"; };
+		E0E0E0E0E0E0E0E0E0E0E0E2 /* Task+Timeout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Task+Timeout.swift"; sourceTree = "<group>"; };
+		A1B2C3D401234567ABCDEF06 /* WKWebView+JavaScriptEvaluating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WKWebView+JavaScriptEvaluating.swift"; sourceTree = "<group>"; };
+		A1B2C3D401234567ABCDEF08 /* WebViewManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewManager.swift; sourceTree = "<group>"; };
+		A1B2C3D401234567ABCDEF0A /* JavaScriptQuoteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavaScriptQuoteTests.swift; sourceTree = "<group>"; };
+		A1B2C3D401234567ABCDEF0C /* MockJavaScriptEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockJavaScriptEvaluator.swift; sourceTree = "<group>"; };
+		A1B2C3D401234567ABCDEF0E /* JavaScriptEvaluatingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JavaScriptEvaluatingTests.swift; sourceTree = "<group>"; };
+		A1B2C3D401234567ABCDEF10 /* WebViewManagerCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewManagerCommandTests.swift; sourceTree = "<group>"; };
+		B1C2D3E401234567ABCDEF02 /* DrawingExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingExportService.swift; sourceTree = "<group>"; };
+		B1C2D3E401234567ABCDEF04 /* DrawingExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingExportServiceTests.swift; sourceTree = "<group>"; };
+		B1C2D3E401234567ABCDEF06 /* WebViewManagerStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewManagerStateTests.swift; sourceTree = "<group>"; };
+		C1D2E3F401234567ABCDEF02 /* FileImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileImportService.swift; sourceTree = "<group>"; };
+		C1D2E3F401234567ABCDEF04 /* FileImportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileImportServiceTests.swift; sourceTree = "<group>"; };
+		D1E2F3A401234567ABCDEF02 /* NiivueURLRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiivueURLRouter.swift; sourceTree = "<group>"; };
+		D1E2F3A401234567ABCDEF04 /* NiivueURLSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiivueURLSchemeHandler.swift; sourceTree = "<group>"; };
+		D1E2F3A401234567ABCDEF06 /* NiivueURLRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiivueURLRouterTests.swift; sourceTree = "<group>"; };
+		E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedFileStore.swift; sourceTree = "<group>"; };
+		K1L2M3N401234567ABCDEF02 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
+		F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HUDMessageParsingTests.swift; sourceTree = "<group>"; };
+		G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayCommandTests.swift; sourceTree = "<group>"; };
+		H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeSeriesCommandTests.swift; sourceTree = "<group>"; };
+		I1J2K3L401234567ABCDEF02 /* SegmentationCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentationCommandTests.swift; sourceTree = "<group>"; };
+		J1K2L3M401234567ABCDEF02 /* SessionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStoreTests.swift; sourceTree = "<group>"; };
+		L1M2N3O401234567ABCDEF02 /* Base64FileEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Base64FileEncoder.swift; sourceTree = "<group>"; };
+		M1N2O3P401234567ABCDEF02 /* SessionSnapshotV1.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSnapshotV1.swift; sourceTree = "<group>"; };
+		N1O2P3Q401234567ABCDEF02 /* Base64FileEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Base64FileEncoderTests.swift; sourceTree = "<group>"; };
+		O1P2Q3R401234567ABCDEF02 /* DicomSeriesStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomSeriesStoreTests.swift; sourceTree = "<group>"; };
+		P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomSeriesStore.swift; sourceTree = "<group>"; };
+		Q1R2S3T401234567ABCDEF02 /* DicomCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicomCommandTests.swift; sourceTree = "<group>"; };
+		76E2A5095D83C725AF9B05BB /* CTPresetServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CTPresetServiceTests.swift; sourceTree = "<group>"; };
+		3C2C8CD003E4BE0DA0797E0E /* CTPresetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CTPresetService.swift; sourceTree = "<group>"; };
+		CF37BABDC367406DAF93D740 /* CTPreprocessingParametersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/CTPreprocessingParametersTests.swift; sourceTree = "<group>"; };
+		1EA7243442C845C5A0F85F73 /* PreprocessedVolumeCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessedVolumeCacheTests.swift; sourceTree = "<group>"; };
+		7D3FA576CD8C6026F28389A9 /* NiftiWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/NiftiWriterTests.swift; sourceTree = "<group>"; };
+		85C9DC972891B2ED0FE5BB06 /* PreprocessingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessingServiceTests.swift; sourceTree = "<group>"; };
+		F969D36DDE464C1DBB79526B /* PreprocessingContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessingContextTests.swift; sourceTree = "<group>"; };
+		79259EF8530D4549859B05F3 /* CTPreprocessingParameters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/CTPreprocessingParameters.swift; sourceTree = "<group>"; };
+		CEC70358F3BC4A799E9D2D83 /* PreprocessedVolumeCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessedVolumeCache.swift; sourceTree = "<group>"; };
+		62C6956F96284A15BF444606 /* PreprocessingContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessingContext.swift; sourceTree = "<group>"; };
+		6012792540A2396CAD130B6F /* NiftiWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/NiftiWriter.swift; sourceTree = "<group>"; };
+		16729CBDBCA997F983DF52F2 /* PreprocessingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preprocessing/PreprocessingService.swift; sourceTree = "<group>"; };
+	/* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		34CD17EF2B45C5400015EF4C /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9FD68E87FCC14B0B91057700 /* nnUNetPreprocessing in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -99,6 +190,7 @@
 			children = (
 				34C48D4E2BF297FD00486C4E /* samples */,
 				3485664C2B5426A4008EF4DD /* dist */,
+				C0FFEE0D1C0FFEE0D1C0FFEF /* Test_CT_DICOM_volumes */,
 				34CD17F42B45C5400015EF4C /* NiiVue */,
 				34CD18052B45C5420015EF4C /* NiiVueTests */,
 				34CD180F2B45C5420015EF4C /* NiiVueUITests */,
@@ -126,6 +218,8 @@
 				34CD17F92B45C5410015EF4C /* Assets.xcassets */,
 				34CD17FB2B45C5410015EF4C /* Preview Content */,
 				3487D34E2BCFD932007C6D7C /* SharedData.swift */,
+				A1B2C3D401234567ABCDEF11 /* Web */,
+				B1C2D3E401234567ABCDEF07 /* Services */,
 			);
 			path = NiiVue;
 			sourceTree = "<group>";
@@ -141,7 +235,29 @@
 		34CD18052B45C5420015EF4C /* NiiVueTests */ = {
 			isa = PBXGroup;
 			children = (
+				N1O2P3Q401234567ABCDEF02 /* Base64FileEncoderTests.swift */,
 				34CD18062B45C5420015EF4C /* NiiVueTests.swift */,
+				A1B2C3D401234567ABCDEF0A /* JavaScriptQuoteTests.swift */,
+				A1B2C3D401234567ABCDEF0C /* MockJavaScriptEvaluator.swift */,
+				A1B2C3D401234567ABCDEF0E /* JavaScriptEvaluatingTests.swift */,
+				A1B2C3D401234567ABCDEF10 /* WebViewManagerCommandTests.swift */,
+				76E2A5095D83C725AF9B05BB /* CTPresetServiceTests.swift */,
+				CF37BABDC367406DAF93D740 /* CTPreprocessingParametersTests.swift */,
+				1EA7243442C845C5A0F85F73 /* PreprocessedVolumeCacheTests.swift */,
+				7D3FA576CD8C6026F28389A9 /* NiftiWriterTests.swift */,
+				85C9DC972891B2ED0FE5BB06 /* PreprocessingServiceTests.swift */,
+				F969D36DDE464C1DBB79526B /* PreprocessingContextTests.swift */,
+				B1C2D3E401234567ABCDEF04 /* DrawingExportServiceTests.swift */,
+				B1C2D3E401234567ABCDEF06 /* WebViewManagerStateTests.swift */,
+				C1D2E3F401234567ABCDEF04 /* FileImportServiceTests.swift */,
+				D1E2F3A401234567ABCDEF06 /* NiivueURLRouterTests.swift */,
+				F1A2B3C401234567ABCDEF02 /* HUDMessageParsingTests.swift */,
+				G1H2I3J401234567ABCDEF02 /* OverlayCommandTests.swift */,
+				H1I2J3K401234567ABCDEF02 /* TimeSeriesCommandTests.swift */,
+				I1J2K3L401234567ABCDEF02 /* SegmentationCommandTests.swift */,
+				J1K2L3M401234567ABCDEF02 /* SessionStoreTests.swift */,
+				O1P2Q3R401234567ABCDEF02 /* DicomSeriesStoreTests.swift */,
+				Q1R2S3T401234567ABCDEF02 /* DicomCommandTests.swift */,
 			);
 			path = NiiVueTests;
 			sourceTree = "<group>";
@@ -154,6 +270,41 @@
 				34CD18122B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift */,
 			);
 			path = NiiVueUITests;
+			sourceTree = "<group>";
+		};
+		A1B2C3D401234567ABCDEF11 /* Web */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D401234567ABCDEF02 /* JavaScriptQuote.swift */,
+				A1B2C3D401234567ABCDEF04 /* JavaScriptEvaluating.swift */,
+				E0E0E0E0E0E0E0E0E0E0E0E1 /* NiivueError.swift */,
+				E0E0E0E0E0E0E0E0E0E0E0E2 /* Task+Timeout.swift */,
+				A1B2C3D401234567ABCDEF06 /* WKWebView+JavaScriptEvaluating.swift */,
+				A1B2C3D401234567ABCDEF08 /* WebViewManager.swift */,
+				D1E2F3A401234567ABCDEF02 /* NiivueURLRouter.swift */,
+				D1E2F3A401234567ABCDEF04 /* NiivueURLSchemeHandler.swift */,
+			);
+			path = Web;
+			sourceTree = "<group>";
+		};
+			B1C2D3E401234567ABCDEF07 /* Services */ = {
+				isa = PBXGroup;
+				children = (
+					L1M2N3O401234567ABCDEF02 /* Base64FileEncoder.swift */,
+					3C2C8CD003E4BE0DA0797E0E /* CTPresetService.swift */,
+					79259EF8530D4549859B05F3 /* CTPreprocessingParameters.swift */,
+					CEC70358F3BC4A799E9D2D83 /* PreprocessedVolumeCache.swift */,
+					62C6956F96284A15BF444606 /* PreprocessingContext.swift */,
+					6012792540A2396CAD130B6F /* NiftiWriter.swift */,
+					16729CBDBCA997F983DF52F2 /* PreprocessingService.swift */,
+					B1C2D3E401234567ABCDEF02 /* DrawingExportService.swift */,
+					C1D2E3F401234567ABCDEF02 /* FileImportService.swift */,
+					E1F2A3B401234567ABCDEF02 /* ImportedFileStore.swift */,
+					M1N2O3P401234567ABCDEF02 /* SessionSnapshotV1.swift */,
+					K1L2M3N401234567ABCDEF02 /* SessionStore.swift */,
+				P1Q2R3S401234567ABCDEF02 /* DicomSeriesStore.swift */,
+			);
+			path = Services;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -174,6 +325,9 @@
 			dependencies = (
 			);
 			name = NiiVue;
+			packageProductDependencies = (
+				7F9CAC282DA440BFB12FCED8 /* nnUNetPreprocessing */,
+			);
 			productName = NiiVue;
 			productReference = 34CD17F22B45C5400015EF4C /* NiiVue.app */;
 			productType = "com.apple.product-type.application";
@@ -246,6 +400,9 @@
 				Base,
 			);
 			mainGroup = 34CD17E92B45C5400015EF4C;
+			packageReferences = (
+				8E368B1C4DFD4DA4B26D94AB /* XCLocalSwiftPackageReference "../../nnUNet" */,
+			);
 			productRefGroup = 34CD17F32B45C5400015EF4C /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -299,26 +456,69 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd ./React\nnpm run build\n";
-		};
-/* End PBXShellScriptBuildPhase section */
+				shellScript = "set -e\n\n# Xcode Run Script phases execute with a minimal PATH (often missing Homebrew).\n# Add common locations for Node/npm.\nexport PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"\n\ncd \"${SRCROOT}/React\"\n\n# By default, this project uses the committed `React/dist` for iOS builds.\n# If you want to force a rebuild (e.g., after editing React/src), set:\n#   NII_VUE_FORCE_REACT_BUILD=1\nFORCE_REBUILD=${NII_VUE_FORCE_REACT_BUILD:-0}\n\n# If dependencies are missing but dist is present, skip rebuilding to keep iOS builds reliable.\nif [ \"$FORCE_REBUILD\" != \"1\" ] && [ ! -d \"node_modules\" ] && [ -f \"dist/index.html\" ]; then\n  echo \"warning: React/node_modules missing; skipping npm build and using existing dist/.\"\n  exit 0\nfi\n\n# If npm isn't on PATH, try enabling nvm-managed Node (common on dev machines).\nif ! command -v npm >/dev/null 2>&1; then\n  export NVM_DIR=\"${NVM_DIR:-$HOME/.nvm}\"\n  if [ -s \"$NVM_DIR/nvm.sh\" ]; then\n    . \"$NVM_DIR/nvm.sh\"\n    nvm use --silent >/dev/null 2>&1 || nvm use --silent node >/dev/null 2>&1 || true\n  fi\nfi\n\nif command -v npm >/dev/null 2>&1; then\n  NPM=`command -v npm`\nelif [ -x /opt/homebrew/bin/npm ]; then\n  NPM=/opt/homebrew/bin/npm\nelif [ -x /usr/local/bin/npm ]; then\n  NPM=/usr/local/bin/npm\nelif [ -x \"$HOME/.volta/bin/npm\" ]; then\n  NPM=\"$HOME/.volta/bin/npm\"\nelif [ -x \"$HOME/.asdf/shims/npm\" ]; then\n  NPM=\"$HOME/.asdf/shims/npm\"\nelse\n  if [ -f \"dist/index.html\" ]; then\n    echo \"warning: npm not found; skipping npm build and using existing dist/.\"\n    exit 0\n  fi\n  echo \"error: npm not found. Install Node.js (includes npm) or ensure npm is on PATH.\"\n  echo \"error: If you use Homebrew, install with: brew install node\"\n  echo \"error: If you use nvm, ensure a Node version is installed: nvm install node\"\n  exit 1\nfi\n\nif [ ! -d \"node_modules\" ]; then\n  echo \"warning: React/node_modules missing; install dependencies with: (cd React && npm ci)\"\nfi\n\n\"$NPM\" run build\n";
+			};
+	/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		34CD17EE2B45C5400015EF4C /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				3487D34F2BCFD932007C6D7C /* SharedData.swift in Sources */,
-				34CD17F62B45C5400015EF4C /* NiiVueApp.swift in Sources */,
-				3487D3492BC85E5B007C6D7C /* ContentView.swift in Sources */,
+			34CD17EE2B45C5400015EF4C /* Sources */ = {
+				isa = PBXSourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					3487D34F2BCFD932007C6D7C /* SharedData.swift in Sources */,
+					34CD17F62B45C5400015EF4C /* NiiVueApp.swift in Sources */,
+					3487D3492BC85E5B007C6D7C /* ContentView.swift in Sources */,
+					A1B2C3D401234567ABCDEF01 /* JavaScriptQuote.swift in Sources */,
+					A1B2C3D401234567ABCDEF03 /* JavaScriptEvaluating.swift in Sources */,
+					E0E0E0E0E0E0E0E0E0E0E0F1 /* NiivueError.swift in Sources */,
+					E0E0E0E0E0E0E0E0E0E0E0F2 /* Task+Timeout.swift in Sources */,
+					A1B2C3D401234567ABCDEF05 /* WKWebView+JavaScriptEvaluating.swift in Sources */,
+					A1B2C3D401234567ABCDEF07 /* WebViewManager.swift in Sources */,
+					L1M2N3O401234567ABCDEF01 /* Base64FileEncoder.swift in Sources */,
+					44E00797F804C49BC5C3E7AE /* CTPresetService.swift in Sources */,
+					3627108DB23D41C1AA3439A1 /* CTPreprocessingParameters.swift in Sources */,
+					3BC590A86410462F9A850254 /* PreprocessedVolumeCache.swift in Sources */,
+					490FFFC9A0BE4E6785976839 /* PreprocessingContext.swift in Sources */,
+					B8F1019AF3A0ABBD9A30630A /* NiftiWriter.swift in Sources */,
+					A26D1CF0DFEB550B4F51E8FB /* PreprocessingService.swift in Sources */,
+					B1C2D3E401234567ABCDEF01 /* DrawingExportService.swift in Sources */,
+					C1D2E3F401234567ABCDEF01 /* FileImportService.swift in Sources */,
+					D1E2F3A401234567ABCDEF01 /* NiivueURLRouter.swift in Sources */,
+					D1E2F3A401234567ABCDEF03 /* NiivueURLSchemeHandler.swift in Sources */,
+					E1F2A3B401234567ABCDEF01 /* ImportedFileStore.swift in Sources */,
+				M1N2O3P401234567ABCDEF01 /* SessionSnapshotV1.swift in Sources */,
+				K1L2M3N401234567ABCDEF01 /* SessionStore.swift in Sources */,
+				P1Q2R3S401234567ABCDEF01 /* DicomSeriesStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		34CD17FE2B45C5420015EF4C /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				34CD18072B45C5420015EF4C /* NiiVueTests.swift in Sources */,
+			34CD17FE2B45C5420015EF4C /* Sources */ = {
+				isa = PBXSourcesBuildPhase;
+				buildActionMask = 2147483647;
+				files = (
+					N1O2P3Q401234567ABCDEF01 /* Base64FileEncoderTests.swift in Sources */,
+					34CD18072B45C5420015EF4C /* NiiVueTests.swift in Sources */,
+					A1B2C3D401234567ABCDEF09 /* JavaScriptQuoteTests.swift in Sources */,
+					A1B2C3D401234567ABCDEF0B /* MockJavaScriptEvaluator.swift in Sources */,
+					A1B2C3D401234567ABCDEF0D /* JavaScriptEvaluatingTests.swift in Sources */,
+					A1B2C3D401234567ABCDEF0F /* WebViewManagerCommandTests.swift in Sources */,
+					05FA761B8C45710BE98CADFB /* CTPresetServiceTests.swift in Sources */,
+					755DC56C68CE45C080C4ADF3 /* CTPreprocessingParametersTests.swift in Sources */,
+					C654B1DD5F4343A7A1AF2A6C /* PreprocessedVolumeCacheTests.swift in Sources */,
+					7B277BD1E89B2E8651C25D81 /* NiftiWriterTests.swift in Sources */,
+					3DDEE989ADCF1025C7031189 /* PreprocessingServiceTests.swift in Sources */,
+					0C2CFF4D1CD44F9F8A51F41B /* PreprocessingContextTests.swift in Sources */,
+					B1C2D3E401234567ABCDEF03 /* DrawingExportServiceTests.swift in Sources */,
+					B1C2D3E401234567ABCDEF05 /* WebViewManagerStateTests.swift in Sources */,
+					C1D2E3F401234567ABCDEF03 /* FileImportServiceTests.swift in Sources */,
+					D1E2F3A401234567ABCDEF05 /* NiivueURLRouterTests.swift in Sources */,
+					F1A2B3C401234567ABCDEF01 /* HUDMessageParsingTests.swift in Sources */,
+				G1H2I3J401234567ABCDEF01 /* OverlayCommandTests.swift in Sources */,
+				H1I2J3K401234567ABCDEF01 /* TimeSeriesCommandTests.swift in Sources */,
+				I1J2K3L401234567ABCDEF01 /* SegmentationCommandTests.swift in Sources */,
+				J1K2L3M401234567ABCDEF01 /* SessionStoreTests.swift in Sources */,
+				O1P2Q3R401234567ABCDEF01 /* DicomSeriesStoreTests.swift in Sources */,
+				Q1R2S3T401234567ABCDEF01 /* DicomCommandTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -397,7 +597,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -451,7 +651,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
@@ -466,15 +666,15 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = NiiVue/NiiVue.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
-				DEVELOPMENT_ASSET_PATHS = "\"NiiVue/Preview Content\"";
-				DEVELOPMENT_TEAM = VJ2G5D3BY7;
-				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = NiiVue/Info.plist;
-				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+					CODE_SIGN_ENTITLEMENTS = NiiVue/NiiVue.entitlements;
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 3;
+					DEVELOPMENT_ASSET_PATHS = "\"NiiVue/Preview Content\"";
+					DEVELOPMENT_TEAM = C3Y254HR6B;
+					ENABLE_PREVIEWS = YES;
+					GENERATE_INFOPLIST_FILE = YES;
+					INFOPLIST_FILE = NiiVue/Info.plist;
+					INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -501,15 +701,15 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = NiiVue/NiiVue.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
-				DEVELOPMENT_ASSET_PATHS = "\"NiiVue/Preview Content\"";
-				DEVELOPMENT_TEAM = VJ2G5D3BY7;
-				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = NiiVue/Info.plist;
-				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+					CODE_SIGN_ENTITLEMENTS = NiiVue/NiiVue.entitlements;
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 3;
+					DEVELOPMENT_ASSET_PATHS = "\"NiiVue/Preview Content\"";
+					DEVELOPMENT_TEAM = C3Y254HR6B;
+					ENABLE_PREVIEWS = YES;
+					GENERATE_INFOPLIST_FILE = YES;
+					INFOPLIST_FILE = NiiVue/Info.plist;
+					INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -534,14 +734,15 @@
 		34CD181A2B45C5420015EF4C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.niivue.NiiVueTests;
+					ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+					BUNDLE_LOADER = "$(TEST_HOST)";
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					DEVELOPMENT_TEAM = C3Y254HR6B;
+					GENERATE_INFOPLIST_FILE = YES;
+					IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+					MARKETING_VERSION = 1.0;
+					PRODUCT_BUNDLE_IDENTIFIER = com.niivue.NiiVueTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
@@ -553,14 +754,15 @@
 		34CD181B2B45C5420015EF4C /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.niivue.NiiVueTests;
+					ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+					BUNDLE_LOADER = "$(TEST_HOST)";
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					DEVELOPMENT_TEAM = C3Y254HR6B;
+					GENERATE_INFOPLIST_FILE = YES;
+					IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+					MARKETING_VERSION = 1.0;
+					PRODUCT_BUNDLE_IDENTIFIER = com.niivue.NiiVueTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
@@ -572,12 +774,13 @@
 		34CD181D2B45C5420015EF4C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.niivue.NiiVueUITests;
+					ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					DEVELOPMENT_TEAM = C3Y254HR6B;
+					GENERATE_INFOPLIST_FILE = YES;
+					MARKETING_VERSION = 1.0;
+					PRODUCT_BUNDLE_IDENTIFIER = com.niivue.NiiVueUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
@@ -589,12 +792,13 @@
 		34CD181E2B45C5420015EF4C /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.niivue.NiiVueUITests;
+					ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					DEVELOPMENT_TEAM = C3Y254HR6B;
+					GENERATE_INFOPLIST_FILE = YES;
+					MARKETING_VERSION = 1.0;
+					PRODUCT_BUNDLE_IDENTIFIER = com.niivue.NiiVueUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
@@ -643,6 +847,21 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		8E368B1C4DFD4DA4B26D94AB /* XCLocalSwiftPackageReference "../../nnUNet" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../nnUNet";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7F9CAC282DA440BFB12FCED8 /* nnUNetPreprocessing */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8E368B1C4DFD4DA4B26D94AB /* XCLocalSwiftPackageReference "../../nnUNet" */;
+			productName = nnUNetPreprocessing;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 34CD17EA2B45C5400015EF4C /* Project object */;
 }

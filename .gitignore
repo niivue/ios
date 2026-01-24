@@ -1,2 +1,32 @@
 .DS_Store
-node_modules
+node_modules/
+
+# SwiftPM / Xcode build output
+.build/
+.deriveddata/
+DerivedData/
+
+# Xcode user-specific files
+*.xcuserdatad/
+*.xcuserdata/
+*.xcuserstate
+
+# Xcode workspace SwiftPM artifacts
+NiiVue/NiiVue.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+NiiVue/NiiVue.xcodeproj/project.xcworkspace/xcuserdata/
+NiiVue/NiiVue.xcodeproj/xcuserdata/
+
+# Xcode test artifacts
+*.xcresult/
+
+# bd (beads) local state
+.beads/
+
+# Large local datasets / experiments (do not commit)
+Test_CT_DICOM_volumes/
+model-zoo/
+renalStructures_CECT_segmentation/
+iOS/
+
+# Git worktrees
+.worktrees/

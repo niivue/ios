@@ -4,5 +4,16 @@
 <dict>
 	<key>UIFileSharingEnabled</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>niivue</string>
+			</array>
+			<key>CFBundleURLName</key>
+			<string>com.niivue.app</string>
+		</dict>
+	</array>
 </dict>
 </plist>
