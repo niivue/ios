@@ -8,10 +8,10 @@
  * mean shipping the drawing and export paths into an extension that must not
  * have them.
  *
- * Milestone 5 scope: voxel and geometry previews. NIfTI, MGH/MGZ, NRRD and
- * MetaImage load through one path — every NiiVue volume reader normalizes into
- * a NIfTI header — into a fixed 2×2 layout. GIFTI, MZ3 and the tract formats
- * take a single fitted 3D render. Both report sanitized metadata in the strip.
+ * Voxel and geometry previews. NIfTI, MGH/MGZ, NRRD and MetaImage load through
+ * one path — every NiiVue volume reader normalizes into a NIfTI header — into a
+ * fixed 2×2 layout. GIFTI, MZ3 and the tract formats take a single fitted 3D
+ * render. Both report sanitized metadata in the strip, labelled for VoiceOver.
  */
 import {
   NiiVue,
@@ -93,12 +93,23 @@ function post(message: HostMessage): void {
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 const stage = {
-  canvas: el<HTMLCanvasElement>('gl'),
   loading: el<HTMLDivElement>('loading'),
   fallback: el<HTMLDivElement>('fallback'),
   fallbackDetail: el<HTMLDivElement>('fallback-detail'),
   meta: el<HTMLDivElement>('meta'),
 }
+
+/**
+ * Resolved on every use, never cached.
+ *
+ * `attachToCanvas` does not keep the element it is given: NiiVue clones it and
+ * calls `replaceChild` (`control/viewBoth.ts`), so any reference taken before
+ * attaching points at a detached node from then on. The clone keeps the `id`,
+ * which is what makes a fresh lookup correct. This is the same trap
+ * `App.tsx` documents for the app's React ref — it cost this page a dead
+ * `ResizeObserver` and an accessibility label written to nothing.
+ */
+const canvas = (): HTMLCanvasElement => el<HTMLCanvasElement>('gl')
 
 /** Never leave a blank canvas — the product contract's hard rule. */
 function showFallback(detail: string): void {
@@ -118,10 +129,18 @@ function showMetadata(name: string, pairs: Record<string, string>): void {
     pair.className = 'pair'
     const strong = document.createElement('b')
     strong.textContent = value
+    // The visible text abbreviates to fit a narrow panel ("fov 165×225×167 mm").
+    // VoiceOver gets the unabbreviated pairing instead, because a screen reader
+    // has no width constraint to justify the shorthand.
+    pair.setAttribute('aria-label', `${key}: ${value}`)
     pair.append(`${key} `, strong)
     stage.meta.append(pair)
   }
+  stage.meta.setAttribute('aria-label', `${name}. ${Object.entries(pairs).map(([k, v]) => `${k}: ${v}`).join('. ')}`)
   stage.meta.hidden = false
+  // The canvas is the one thing on screen a screen reader cannot describe, so
+  // it borrows the same summary rather than announcing an unlabelled graphic.
+  canvas().setAttribute('aria-label', `Preview of ${name}`)
 }
 
 /**
@@ -135,23 +154,14 @@ function showMetadataOnly(name: string, pairs: Record<string, string>, reason: s
   showFallback(`No image preview for this file — ${reason}.`)
 }
 
-/**
- * Keep the drawing buffer matched to the CSS box as Finder resizes the panel.
- * Without this the canvas keeps its initial backing size and goes soft — the
- * preview is resizable by definition, so this is not optional polish.
+/*
+ * There is no ResizeObserver here, deliberately. Milestone 2 added one to keep
+ * the drawing buffer matched as Finder resizes the panel; it observed the
+ * pre-attach canvas, so it never fired once — and the resize behaviour was
+ * correct anyway, because NiiVue installs its own observer
+ * (`control/interactions.ts`) and owns `devicePixelRatio`. Reinstating one here
+ * would fight NiiVue for the canvas dimensions rather than help.
  */
-function trackSize(nv: NiiVue): () => void {
-  const observer = new ResizeObserver(() => {
-    const ratio = window.devicePixelRatio || 1
-    const { clientWidth, clientHeight } = stage.canvas
-    if (!clientWidth || !clientHeight) return
-    stage.canvas.width = Math.round(clientWidth * ratio)
-    stage.canvas.height = Math.round(clientHeight * ratio)
-    nv.drawScene()
-  })
-  observer.observe(stage.canvas)
-  return () => observer.disconnect()
-}
 
 /**
  * Exactly one terminal message per preview, from whichever of the three racing
@@ -328,7 +338,7 @@ async function main(): Promise<void> {
       // volume render. Named for meshes; not mesh-only. See the app's bridge.ts.
       meshXRay: 0.05,
     })
-    await nv.attachToCanvas(stage.canvas)
+    await nv.attachToCanvas(canvas())
   } catch (error) {
     // Both graphics backends are gone. The native side turns this into its own
     // fallback view; without the message it would see a black rectangle.
@@ -337,7 +347,6 @@ async function main(): Promise<void> {
     return
   }
 
-  trackSize(nv)
   post({ stage: 'ready' })
 }
 

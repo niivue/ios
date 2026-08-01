@@ -57,19 +57,21 @@ const componentsPerVoxel: Record<number, number> = {
 /** Spatial unit from the low three bits of `xyzt_units`. */
 const spatialUnits: Record<number, string> = { 1: 'm', 2: 'mm', 3: 'µm' }
 
-/** NIfTI is one of many containers NiiVue normalizes; name what the user opened. */
+/**
+ * NIfTI is one of many containers NiiVue normalizes; name what the user opened.
+ *
+ * Exactly the extensions the extension claims, and no more. NiiVue reads a
+ * dozen others, but a name here for a type Quick Look never routes to us is
+ * dead config that reads as though the format were supported. The detached
+ * families (`nhdr`, `mhd`, AFNI `head`/`brik`, NIfTI `hdr`/`img`) are
+ * deliberately absent — see the Milestone 6 decision.
+ */
 const formatNames: Record<string, string> = {
   nii: 'NIfTI',
   mgh: 'MGH',
   mgz: 'MGZ',
   nrrd: 'NRRD',
-  nhdr: 'NRRD',
   mha: 'MetaImage',
-  mhd: 'MetaImage',
-  mif: 'MIF',
-  mih: 'MIF',
-  head: 'AFNI',
-  brik: 'AFNI',
   gii: 'GIFTI',
   mz3: 'MZ3',
   tck: 'TCK',

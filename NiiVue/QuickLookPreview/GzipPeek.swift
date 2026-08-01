@@ -113,4 +113,70 @@ enum VolumeSniff {
         if (big == 540 || little == 540) && magic(at: 4, ["n+2", "ni2"]) { return true }
         return false
     }
+
+    /// Bytes one frame of this volume will occupy once decoded, or nil if the
+    /// header is not a NIfTI we can measure.
+    ///
+    /// This exists because the file-size cap does **not** bound the decoded
+    /// size: a few hundred kilobytes of gzip can claim any dimensions it likes,
+    /// and the allocation that follows happens inside WebKit's content process
+    /// where a refusal is a crash rather than an error. Measuring the header
+    /// before the page ever fetches the file is the only point at which a
+    /// hostile one can be turned away cheaply.
+    ///
+    /// Frame count is deliberately clamped to one — the preview loads frame
+    /// zero only (`limitFrames4D: 1`), so a 2000-volume time series is not
+    /// oversized by virtue of being long.
+    static func decodedFrameBytes(_ header: Data) -> Int? {
+        let bytes = [UInt8](header)
+        func value(at offset: Int, width: Int, swapped: Bool) -> Int64? {
+            guard bytes.count >= offset + width else { return nil }
+            let slice = Array(bytes[offset..<offset + width])
+            let ordered = swapped ? slice.reversed().map { $0 } : slice
+            return ordered.reduce(Int64(0)) { ($0 << 8) | Int64($1) }
+        }
+
+        // Layout differs between the two versions: NIfTI-1 keeps 16-bit dims at
+        // 40 and the datatype at 70; NIfTI-2 widens dims to 64-bit at 16 and
+        // moves the datatype to 12.
+        let isNifti2: Bool
+        var swapped: Bool
+        if let big = value(at: 0, width: 4, swapped: false), big == 348 {
+            isNifti2 = false; swapped = false
+        } else if let little = value(at: 0, width: 4, swapped: true), little == 348 {
+            isNifti2 = false; swapped = true
+        } else if let big = value(at: 0, width: 4, swapped: false), big == 540 {
+            isNifti2 = true; swapped = false
+        } else if let little = value(at: 0, width: 4, swapped: true), little == 540 {
+            isNifti2 = true; swapped = true
+        } else {
+            return nil
+        }
+
+        let dimBase = isNifti2 ? 16 : 40
+        let dimWidth = isNifti2 ? 8 : 2
+        let bitpixAt = isNifti2 ? 14 : 72
+        guard let bitpix = value(at: bitpixAt, width: 2, swapped: swapped), bitpix > 0 else {
+            return nil
+        }
+
+        var voxels: Int64 = 1
+        for axis in 1...3 {
+            guard let dim = value(at: dimBase + axis * dimWidth, width: dimWidth, swapped: swapped),
+                  dim > 0 else {
+                // A zero or negative dimension is not oversized, it is broken;
+                // the page's own header check reports that far more usefully.
+                return nil
+            }
+            // Multiply defensively: a hostile header's whole purpose is to make
+            // this product overflow into something small and plausible.
+            let (product, overflow) = voxels.multipliedReportingOverflow(by: dim)
+            if overflow { return Int.max }
+            voxels = product
+        }
+        let (bits, overflow) = voxels.multipliedReportingOverflow(by: bitpix)
+        if overflow { return Int.max }
+        let byteCount = bits / 8
+        return byteCount > Int64(Int.max) ? Int.max : Int(byteCount)
+    }
 }

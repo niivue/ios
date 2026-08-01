@@ -514,10 +514,143 @@ gzip is internal to the format and the extension stays `.mz3`.
 | Resizing does not crop or blur the render | **pass** — the drawing buffer tracks CSS size × DPR after a viewport change, and the render survives it |
 | Layer-only and malformed GIFTI produce an accurate fallback | **pass** |
 
-## Regression coverage added for Milestones 3–5
+## Milestone 6 — DROPPED, owner decision 2026-08-01. No detached formats in v1.
+
+Detached pairs (NIfTI `.hdr`/`.img`, MetaImage `.mhd`, AFNI `.HEAD`/`.BRIK`,
+NRRD `.nhdr`) are **out of v1 entirely**. The owner's rule was all-or-none, and
+measuring the extensions is what makes "none" the only consistent answer:
+
+| Extension | Resolves to on macOS |
+| --- | --- |
+| `.hdr` | **`public.radiance`** — Apple's Radiance HDR image type |
+| `.img` | **`com.apple.disk-image-udif`** — Apple's disk image type |
+| `.raw` | `com.panasonic.raw-image` |
+| `.HEAD` / `.BRIK` / `.nhdr` | unclaimed dynamic types |
+
+Supporting NIfTI `hdr`/`img` means claiming `public.radiance`. That is the gzip
+trade-off again but inverted: the `.gz` claim was acceptable *because macOS
+ships no rich preview for it*, so the practical loss was near zero. Radiance HDR
+files have a working image preview today, and we would replace it with a text
+panel.
+
+That is also the ceiling, not the floor. Rendering any detached pair needs read
+access to a **sibling** file, and Quick Look hands the extension a sandbox token
+for the previewed item only. So the realistic outcome for all four families is
+metadata-only — i.e. displacing Radiance previews with text, for nothing.
+
+**Consequence applied:** `org.itk.metaimage-header` (`.mhd`) has been removed
+from the extension's `QLSupportedContentTypes` *and* from the app's exported
+type declarations. It was the one detached format v1 advertised, and it was the
+one v1 failed: a detached `.mhd` made NiiVue throw `infinite image` and the
+panel read "This file could not be read." Self-contained `.mha` and `.nrrd` are
+unaffected. `.mhd` still *resolves* to `org.itk.metaimage-header` on this
+machine because ITK-SNAP and MRIcro declare it independently — that is fine, and
+is exactly why it should not be ours.
+
+`formatNames` in `preview-metadata.ts` was trimmed to the claimed extensions at
+the same time; a format name for a type Quick Look never routes to us reads as
+though the format were supported.
+
+## Milestone 7 results — resource policy and failure UX (2026-08-01)
+
+### The file cap did not bound the decoded size, and now something does
+
+This was the substantive gap. `maxFileBytes` (256 MB) bounds what is read from
+disk; it says nothing about what the *header claims*, and the allocation that
+follows happens inside WebKit's content process, where running out is a crash
+rather than an error anyone can report.
+
+`VolumeSniff.decodedFrameBytes` measures one decoded frame from the NIfTI-1 or
+NIfTI-2 header — both byte orders, with overflow-checked multiplication, because
+making the product wrap into something small and plausible is precisely what a
+hostile header is for. Frames are clamped to one, since the preview loads frame
+zero only; a 2000-volume time series is not oversized for being long.
+
+Verified by compiling the real Swift against generated fixtures (the same method
+Milestone 1 used for `GzipPeek`):
+
+| Fixture | On disk | Decoded claim | Outcome |
+| --- | --- | --- | --- |
+| 188×256×190 uint8 | 9,144,672 B | 8 MB | allowed |
+| 12×12×10×7 (4D) | 10,432 B | one frame | allowed |
+| 64×64×40 gzipped | 10,488 B | <1 MB | allowed |
+| **32767³ float64, gzipped** | **77 B** | **256 TB** | **refused** |
+| non-NIfTI | 800 B | not measurable | size cap only |
+
+A **77-byte** file that would have provoked a 256 TB allocation now never
+reaches the page. It passed the file cap trivially before.
+
+**NIfTI is the only format given this treatment, and that is a considered
+limit,** not an oversight. A NIfTI header can *claim* arbitrary dimensions in a
+fixed 348 bytes; mz3/tck/trk/trx store actual vertex data, so a lying count
+produces a short read and a reader error rather than an allocation. Adding three
+more header parsers would buy far less than the first one did.
+
+### Other deliverables
+
+- **The Quick Look callback no longer does file I/O.** Reading and inflating the
+  header moved to a background queue, with the continuation hopping back to the
+  main queue where the generation check makes a superseded preview harmless.
+- **Timing instrumentation at the one place that can measure the gate**: on
+  `loaded`, the extension logs `prepare` (from `preparePreviewOfFile` entry) and
+  `launch` (process start to that entry) separately — the plan is explicit that
+  cold-start cost is not ours to fix.
+- **Accessibility.** The strip is a labelled `role="group"`; each pair carries
+  the unabbreviated `key: value` as `aria-label`, because the visible text
+  abbreviates to fit a narrow panel and a screen reader has no width constraint
+  to justify that; the canvas is labelled instead of announcing as an unlabelled
+  graphic.
+- **No path ever reaches the user.** The page shows only `failureText[code]`;
+  NiiVue's error text goes to the log and nowhere else. The decline log line no
+  longer interpolates the filename.
+
+### A real bug this milestone uncovered: the canvas reference was stranded
+
+Adding the canvas `aria-label` failed silently, which exposed the trap
+`CLAUDE.md` already documents for the app's React ref — **`attachToCanvas` does
+not keep the element it is given.** NiiVue `cloneNode(false)`s it and calls
+`replaceChild` (`control/viewBoth.ts:281`), so every reference taken before
+attaching points at a detached node from then on. Proved by hooking
+`setAttribute`: the write landed on a node with `isConnected: false`.
+
+Two consequences, both since Milestone 2:
+
+1. The accessibility label was written to nothing.
+2. **`trackSize`'s `ResizeObserver` observed the detached canvas and never fired
+   once.** Milestone 2 listed it as "not optional polish"; it had never run.
+
+`trackSize` is now **deleted rather than repaired**: NiiVue installs its own
+`ResizeObserver` (`control/interactions.ts:2234`) and owns `devicePixelRatio`,
+which is why resizing was correct all along and why the Milestone 5 resize gate
+passed against dead code. Reinstating one would fight NiiVue for the canvas
+dimensions. The canvas is now resolved by `id` at every use; the clone keeps the
+`id`, which is what makes a fresh lookup correct.
+
+### Exit gate
+
+| Criterion | Status |
+| --- | --- |
+| Oversized and hostile headers rejected before large allocations | **pass** — table above |
+| Heavy parsing asynchronous from the preview-controller callback | **pass** |
+| Graphics-init failure surfaces to a fallback | **pass** (Milestone 2, covered by the suite) |
+| Concise errors, no filesystem paths | **pass** |
+| Accessibility labels for filename, format, metadata, loading, errors | **pass** — covered by the suite |
+| ≤2 s from `preparePreviewOfFile` to `loaded`, cold launch reported separately | **instrumented, needs a Finder run** — the number is in the log |
+| Dismissal during a large load returns promptly | **by construction** (`viewDidDisappear` teardown) — needs a Finder run |
+| Twenty sequential previews return near baseline memory | **needs a Finder run.** The substantive fix was Milestone 3's retain cycle |
+
+The three open rows all need Finder, which `qlmanage` cannot drive from a
+non-GUI shell. Read the timings with:
+
+```sh
+log show --last 10m --style compact \
+  --predicate 'subsystem == "com.niivue.mobile.QuickLookPreview"'
+```
+
+## Regression coverage added for Milestones 3–5, 7
 
 `NiiVue/React/tests/preview-regression.mjs`, run with `npm run test:preview`.
-**75 checks, all passing.** Same shape as `bridge-regression.mjs`: it drives the
+**78 checks, all passing.** Same shape as `bridge-regression.mjs`: it drives the
 built `dist/` in headless Chromium over a throwaway http server, so it exercises
 the bytes the extension bundles.
 
@@ -673,8 +806,7 @@ wound down across recent macOS releases. Either drop the Intel claim to
 | NIfTI | `.nii`, `.nii.gz` | MPR + Render | Frame zero only for 4D; compound-extension UTI routing is a release gate. |
 | MGH | `.mgh`, `.mgz` | MPR + Render | Generate a small `.mgh` fixture from a licensed `.mgz` fixture if needed. |
 | NRRD | `.nrrd` | MPR + Render | Self-contained NRRD only; detached `.nhdr` is out of scope. |
-| MetaImage | `.mha` | MPR + Render | Self-contained files are required. |
-| MetaImage detached | `.mhd` | MPR + Render if its single sibling payload is accessible; otherwise metadata fallback | Full support is controlled by the Milestone 6 feasibility gate. |
+| MetaImage | `.mha` | MPR + Render | Self-contained files are required; `.mhd` is not claimed — see the Milestone 6 decision. |
 | GIFTI | `.gii` | 3D render for geometry; metadata fallback for layer-only files | Do not search the filesystem for a companion surface. |
 | MZ3 | `.mz3` | 3D render | Use NiiVue's native mesh reader. |
 | Streamlines | `.tck`, `.trk`, `.trx` | 3D render | Use NiiVue's mesh/tract loader and default directional coloring. |

@@ -199,6 +199,18 @@ check('orientation is a 3-letter code', /^[RLAPSI]{3}$/.test(meta.orient ?? ''),
 check('a 3D volume reports no frame count', meta.frames === undefined, meta.frames)
 check('file size is shown', meta.size === '4.0 MB', meta.size)
 
+// Accessibility: the strip abbreviates to fit a narrow panel, so the
+// unabbreviated pairing has to exist somewhere a screen reader can reach.
+const a11y = await result.page.evaluate(() => ({
+  group: document.getElementById('meta').getAttribute('aria-label'),
+  canvas: document.getElementById('gl').getAttribute('aria-label'),
+  pair: document.querySelector('#meta .pair').getAttribute('aria-label'),
+  role: document.getElementById('meta').getAttribute('role'),
+}))
+check('the strip is announced as a labelled group', a11y.role === 'group' && a11y.group?.includes(DEMO), a11y.group)
+check('each value carries its label', /^[a-z]+: .+/.test(a11y.pair ?? ''), a11y.pair)
+check('the canvas is not an unlabelled graphic', a11y.canvas?.includes(DEMO), a11y.canvas)
+
 const strip = await result.page.locator('#meta').innerText()
 check('the strip shows the filename', strip.includes(DEMO), strip.replace(/\n/g, ' | '))
 check('the spinner is dismissed', await result.page.locator('#loading').isHidden())

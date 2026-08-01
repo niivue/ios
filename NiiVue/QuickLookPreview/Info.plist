@@ -58,7 +58,6 @@
 				<string>edu.mgh.freesurfer.mgz</string>
 				<string>org.nrrd.nrrd</string>
 				<string>org.itk.metaimage</string>
-				<string>org.itk.metaimage-header</string>
 				<string>org.nitrc.gifti</string>
 				<string>com.niivue.mz3</string>
 				<string>org.mrtrix.tck</string>

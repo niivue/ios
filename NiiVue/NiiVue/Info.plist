@@ -98,23 +98,6 @@
 		</dict>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>org.itk.metaimage-header</string>
-			<key>UTTypeDescription</key>
-			<string>MetaImage Header</string>
-			<key>UTTypeConformsTo</key>
-			<array>
-				<string>public.data</string>
-			</array>
-			<key>UTTypeTagSpecification</key>
-			<dict>
-				<key>public.filename-extension</key>
-				<array>
-					<string>mhd</string>
-				</array>
-			</dict>
-		</dict>
-		<dict>
-			<key>UTTypeIdentifier</key>
 			<string>org.nitrc.gifti</string>
 			<key>UTTypeDescription</key>
 			<string>GIFTI Surface</string>

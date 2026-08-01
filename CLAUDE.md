@@ -543,16 +543,27 @@ address reuse. The dispatched closure holds the task strongly until after
 ## Quick Look preview extension (in progress)
 
 `quicklook_plan.md` is the plan and the record. Status: **Milestones 0.5–5
-landed** (2026-08-01); Milestone 6 (detached `.mhd` feasibility gate) is next.
+landed** (2026-08-01), Milestone 6 **dropped** (no detached formats in v1 —
+`.hdr` is Apple's Radiance image type and `.img` its disk-image type, so
+claiming them is not acceptable; `.mhd` was un-claimed as a consequence).
+Milestone 8 (system verification) is next.
 The extension does **not** ship yet — `README.md` describes it, so treat that as
 planned, not delivered.
 
 Web-side checks for the preview live in
-`NiiVue/React/tests/preview-regression.mjs` (`npm run test:preview`, 75 checks)
+`NiiVue/React/tests/preview-regression.mjs` (`npm run test:preview`, 78 checks)
 with generated NIfTI/GIFTI fixtures in `tests/preview-fixtures.mjs`. They are
 separate from `test:bridge` because the two pages share no code. The mesh and
 tract checks read real files from the private Git-LFS `dev-images` package by
 absolute path and print `SKIP` when it is absent.
+
+**`attachToCanvas` replaces the canvas element** — NiiVue `cloneNode(false)`s it
+and calls `replaceChild`, so a reference taken before attaching is detached from
+then on. `quicklook.ts` therefore resolves the canvas by `id` at every use. This
+already cost the preview a `ResizeObserver` that never fired and an aria-label
+written to nothing; it is the same trap `App.tsx` documents for the React ref.
+Do not add a `ResizeObserver` to the preview page — NiiVue installs its own and
+owns `devicePixelRatio`.
 
 **The preview turns `is3DCrosshairVisible` and `meshXRay` OFF for geometry**
 (`quicklook.ts`, mesh branch only). Both are correct for a volume and wrong for

@@ -70,7 +70,7 @@
   <body>
     <div id="shell">
       <div id="stage">
-        <canvas id="gl"></canvas>
+        <canvas id="gl" role="img" aria-label="Loading preview"></canvas>
         <div class="overlay" id="loading" role="status" aria-live="polite">
           <div class="spinner" aria-hidden="true"></div>
           <div>Loading preview…</div>
@@ -80,7 +80,9 @@
           <div id="fallback-detail"></div>
         </div>
       </div>
-      <div id="meta" hidden></div>
+      <!-- `group`, not a bare div: the strip is a set of related values and
+           should be reachable and announced as one unit. -->
+      <div id="meta" role="group" aria-label="File details" hidden></div>
     </div>
     <script type="module" src="/src/quicklook.ts"></script>
   </body>

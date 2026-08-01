@@ -56,10 +56,21 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     private static let readinessTimeout: TimeInterval = 10
     /// The page came up but never finished with the document.
     private static let loadTimeout: TimeInterval = 20
-    /// Provisional. Milestone 7 replaces this with a number measured from real
-    /// headroom; until then it matches the host app's import cap. An unreadable
-    /// size fails closed rather than passing the cap as zero.
+    /// Bytes on disk. An unreadable size fails closed rather than passing the
+    /// cap as zero.
     private static let maxFileBytes = 256 * 1024 * 1024
+    /// Bytes **one decoded frame** may occupy, which the file cap does not
+    /// bound — a small gzip can claim any dimensions. Set equal to the file cap
+    /// so the rule is one sentence: a preview will not decode more than it
+    /// would accept as a file. Measured headroom (Milestone 0.5) was one 9.1 MB
+    /// volume costing ~300 MB across the shared WebKit processes, most of it
+    /// baseline; that is one data point, not a profile, so this is a guard
+    /// against hostile headers rather than a tuned budget. Raising it needs
+    /// per-device measurement.
+    private static let maxDecodedBytes = 256 * 1024 * 1024
+    /// Cheap to read, and it is the only header we can measure without a
+    /// format-specific parser. Everything else falls back to the file cap.
+    private static let headerPeekBytes = 1024
 
     /// Extensions NiiVue loads through `loadMeshes` rather than `loadVolumes`.
     /// Milestone 5 owns the mesh path; the classification lives here because the
@@ -87,6 +98,13 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     /// True only when `startAccessingSecurityScopedResource` returned true, so
     /// the balancing `stop` is never called spuriously.
     private var scopedURL: URL?
+    /// `preparePreviewOfFile` entry. The exit gate is measured from here to the
+    /// page's `loaded`, and cold extension launch is reported separately
+    /// because it is not ours to fix — see `processStart`.
+    private var startedAt: Date?
+    /// When this extension process began, so a first preview can be told apart
+    /// from a warm one in the log.
+    private static let processStart = Date()
 
     private struct PreviewRequest {
         let displayName: String
@@ -183,12 +201,21 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     /// inconclusive — i.e. a gzip variant this reader cannot inflate — where a
     /// user who named a file `.nii.gz` is better served by trying and failing
     /// visibly than by being told it is a foreign archive.
-    private func disposition(for url: URL, type: String) -> Disposition {
+    private func disposition(for url: URL, type: String, header: Data?) -> Disposition {
         guard type == Self.gzipType else { return .render }
-        if let header = GzipPeek.inflatePrefix(ofFileAt: url) {
+        if let header {
             return VolumeSniff.isNIfTI(header) ? .render : .decline
         }
         return url.lastPathComponent.lowercased().hasSuffix(".nii.gz") ? .render : .decline
+    }
+
+    /// A bounded prefix of the file, inflated if it is gzip. Runs off the main
+    /// thread — see `preparePreviewOfFile`.
+    private static func peekHeader(at url: URL) -> Data? {
+        if let inflated = GzipPeek.inflatePrefix(ofFileAt: url) { return inflated }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        return try? handle.read(upToCount: headerPeekBytes)
     }
 
     /// Which NiiVue loader the page should use. A gzipped file is classified on
@@ -205,18 +232,7 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     // MARK: - QLPreviewingController
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
-        let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)?.identifier ?? ""
-        guard disposition(for: url, type: type) == .render else {
-            // Declining, rather than drawing our own panel over someone else's
-            // archive, is what NIfTIViewQL does and it is the better citizen:
-            // a .tar.gz keeps whatever preview it would otherwise have had.
-            log.notice("declining foreign archive \(url.lastPathComponent, privacy: .public)")
-            handler(NSError(domain: "com.niivue.mobile.QuickLookPreview", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Not a NIfTI volume.",
-            ]))
-            return
-        }
-
+        startedAt = Date()
         // Quick Look is not documented to load the view before preparing, and
         // every path below touches the web view. Forcing it here turns a
         // hypothetical ordering change from a nil-unwrap crash into a no-op.
@@ -236,23 +252,24 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
             scopedURL = url
         }
 
-        // Fails closed: an unreadable size refuses the file rather than passing
-        // the cap as zero.
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize)
-        if let size, size <= Self.maxFileBytes {
-            request = PreviewRequest(displayName: url.lastPathComponent,
-                                     fileSize: size,
-                                     family: family(for: url),
-                                     documentURL: schemeHandler.registerDocument(url, fileName: url.lastPathComponent))
-        } else {
-            pendingFailure = size == nil ? .unreadable : .resourceLimit
-            log.error("refusing file: \(self.pendingFailure?.rawValue ?? "", privacy: .public)")
+        // Reading and inflating the header is file I/O, and this is Quick
+        // Look's callback: it must not block. Everything that touches the
+        // controller hops back to the main queue, where the generation check
+        // makes a superseded preview's work harmless.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)?.identifier ?? ""
+            let header = Self.peekHeader(at: url)
+            // Fails closed: an unreadable size refuses the file rather than
+            // passing the cap as zero.
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+            DispatchQueue.main.async {
+                guard let self, self.generation == current else { return }
+                self.begin(url: url, type: type, header: header, fileSize: size)
+            }
         }
 
-        webView.load(URLRequest(url: PreviewSchemeHandler.pageURL()))
-
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.readinessTimeout) { [weak self] in
-            guard let self, self.generation == current, self.completion != nil, self.request != nil || self.pendingFailure != nil else { return }
+            guard let self, self.generation == current, self.completion != nil else { return }
             // The shell itself never came up, so there is no fallback panel to
             // show the failure in. Completing with an error hands Quick Look
             // back its own panel, which beats an indefinite spinner.
@@ -261,6 +278,54 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
                 NSLocalizedDescriptionKey: "The preview could not start.",
             ]))
         }
+    }
+
+    /// Main-queue continuation of `preparePreviewOfFile`, once the header has
+    /// been read off it.
+    private func begin(url: URL, type: String, header: Data?, fileSize: Int?) {
+        guard disposition(for: url, type: type, header: header) == .render else {
+            // Declining, rather than drawing our own panel over someone else's
+            // archive, is what NIfTIViewQL does and it is the better citizen:
+            // a .tar.gz keeps whatever preview it would otherwise have had.
+            log.notice("declining foreign archive")
+            finish(NSError(domain: "com.niivue.mobile.QuickLookPreview", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Not a NIfTI volume.",
+            ]))
+            return
+        }
+
+        if let failure = budgetFailure(fileSize: fileSize, header: header) {
+            pendingFailure = failure
+            log.error("refusing file: \(failure.rawValue, privacy: .public)")
+        } else {
+            request = PreviewRequest(displayName: url.lastPathComponent,
+                                     fileSize: fileSize ?? -1,
+                                     family: family(for: url),
+                                     documentURL: schemeHandler.registerDocument(url, fileName: url.lastPathComponent))
+        }
+
+        webView.load(URLRequest(url: PreviewSchemeHandler.pageURL()))
+    }
+
+    /// Why this file must not be handed to the page, if it must not be.
+    ///
+    /// Both limits are checked before a single byte reaches WebKit. The decoded
+    /// check is the one that matters for a hostile file: the size cap passes a
+    /// small gzip that claims enormous dimensions, and the allocation it
+    /// provokes happens inside the content process, where running out is a
+    /// crash rather than an error we can report.
+    private func budgetFailure(fileSize: Int?, header: Data?) -> PreviewFailure? {
+        guard let fileSize else { return .unreadable }
+        if fileSize > Self.maxFileBytes { return .resourceLimit }
+        if let header, let decoded = VolumeSniff.decodedFrameBytes(header) {
+            if decoded > Self.maxDecodedBytes {
+                log.error("header claims \(decoded / (1024 * 1024)) MB decoded")
+                return .resourceLimit
+            }
+        }
+        // A header we cannot measure is not a pass by default — it is simply
+        // out of scope for this check, and the size cap above still applies.
+        return nil
     }
 
     /// Fire the completion gate exactly once.
@@ -282,6 +347,15 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         case "ready":
             dispatchRequest()
         case "loaded":
+            // The Milestone 7 gate, reported at the one point that can measure
+            // it. `launch` is the cold-start cost Quick Look imposes before we
+            // are called at all; it is deliberately separate from `prepare`,
+            // which is the part this code controls.
+            if let startedAt {
+                let prepare = Date().timeIntervalSince(startedAt) * 1000
+                let launch = startedAt.timeIntervalSince(Self.processStart) * 1000
+                log.notice("preview loaded in \(prepare, format: .fixed(precision: 0)) ms (extension launch \(launch, format: .fixed(precision: 0)) ms)")
+            }
             finish(nil)
         case "failed":
             let code = payload["code"] as? String ?? PreviewFailure.internalFailure.rawValue
