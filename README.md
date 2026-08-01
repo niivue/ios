@@ -179,4 +179,83 @@ See [`NiiVue/React/README.md`](NiiVue/React/README.md) for the bridge contract a
 
 ### Quick Look Preview
 
-On MacOS, this tool also provides a Quick Look Preview extension. It can view many voxel -based images (e.g. NIfTI, MGH), meshes (GIFTI) and streamlines (TRK, TRX, TCK). This is a differentiator relative to other voxel-based viewers including [NIfTIViewQL](https://github.com/pmolfese/NIfTIViewQL) and [MIQ](https://github.com/marcoduering/MIQ).
+On macOS, this tool also provides a Quick Look Preview extension: select a file
+in Finder, press Space, and the image is rendered in place. This is a
+differentiator relative to other voxel-based viewers including
+[NIfTIViewQL](https://github.com/pmolfese/NIfTIViewQL) and
+[MIQ](https://github.com/marcoduering/MIQ), which preview NIfTI only.
+
+The extension is offline by construction — every asset is bundled, the page is
+served over a private scheme under a self-only Content Security Policy, and no
+code path performs a network request.
+
+#### Supported formats
+
+| Family | Extensions | Shown as |
+| --- | --- | --- |
+| NIfTI | `.nii`, `.nii.gz` | Axial / Coronal / Sagittal / 3D render |
+| MGH | `.mgh`, `.mgz` | Axial / Coronal / Sagittal / 3D render |
+| NRRD | `.nrrd` | Axial / Coronal / Sagittal / 3D render |
+| MetaImage | `.mha` | Axial / Coronal / Sagittal / 3D render |
+| GIFTI, MZ3 | `.gii`, `.mz3` | fitted 3D surface |
+| Streamlines | `.tck`, `.trk`, `.trx` | fitted 3D bundle, directional colouring |
+
+Volumes are drawn in **neurological orientation** with the crosshair centred and
+orientation labels visible. Drag to rotate the 3D view; the panel is resizable.
+A compact strip along the bottom reports format, dimensions, voxel size, field
+of view, datatype, orientation and file size — all read from the header. No
+free-text or patient-adjacent header field is ever displayed.
+
+**4D data shows frame zero only**, and says so: the strip reads `frames 1 of N`
+rather than hiding the rest.
+
+#### What is deliberately not previewed
+
+- **Detached formats** — NIfTI `.hdr`/`.img`, MetaImage `.mhd`, AFNI
+  `.HEAD`/`.BRIK` and NRRD `.nhdr`. Two reasons: a Quick Look extension is
+  granted read access to the previewed file only, not its siblings, so the image
+  data is out of reach; and `.hdr`/`.img` are already macOS types (Radiance HDR
+  images and disk images), which this extension will not take over.
+- **Gzipped meshes** (`.gii.gz`). A `.gz` is accepted only when its content is a
+  NIfTI, and that check is deliberately strict.
+- **FreeSurfer surfaces** (`.white`, `.pial`, …), `.obj`, `.stl`, `.ply` — their
+  extensions are too generic, or better served by existing viewers.
+
+#### When there is no image
+
+The panel never goes blank. A file that parses but cannot produce an ordinary
+view — a single-slice volume, a truncated file, a GIFTI holding only per-vertex
+values — shows its metadata plus a line explaining why. A file that cannot be
+read at all shows a short reason. Errors never include a filesystem path.
+
+Previews are refused before loading if the file exceeds 256 MB on disk, or if
+its header claims more than 256 MB of voxel data for a single frame. The second
+check is what stops a small file with impossible dimensions.
+
+#### Non-NIfTI `.gz` files
+
+Because macOS resolves a file's type from its last extension only, `.nii.gz` can
+reach the extension only by claiming generic gzip. Any other `.gz` — a tarball,
+say — is handed straight back, so it keeps whatever preview it had.
+
+#### Troubleshooting
+
+If pressing Space shows nothing, or the old previewer:
+
+```sh
+# Confirm macOS knows about the extension
+pluginkit -m -v -A -D | grep niivue
+
+# Re-register the app and clear Quick Look's cache
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+  -f -R /Applications/NiiVue.app
+qlmanage -r && qlmanage -r cache
+
+# Watch what the extension is doing
+log show --last 5m --style compact \
+  --predicate 'subsystem == "com.niivue.mobile.QuickLookPreview"'
+```
+
+The app must have been launched at least once, and must live somewhere Launch
+Services scans (`/Applications` is reliable). `qlmanage -p` does **not** work
+from a plain terminal session — use Finder.

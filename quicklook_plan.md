@@ -332,7 +332,7 @@ have them.
 | --- | --- |
 | Clean build embeds the extension and both web entries | **pass** (verified from a deleted `dist/`) |
 | iOS Simulator / generic iOS device / Mac Catalyst all build | **pass** |
-| No network access in the runtime bundle | **pass** — the preview's own chunks (`quicklook-*.js`, `niivue-*.js`) contain **zero** remote URLs; the only hit anywhere is `https://react.dev` in the *app* entry, an unfetched React error link that the preview page never loads |
+| No network access in the runtime bundle | **pass**, with the claim corrected in Milestone 8 — see there. The preview entry chunk has no remote URL at all; the shared `niivue-*.js` chunk contains two `http://` strings, neither of them fetched |
 | Spacebar shows the loading shell then a deterministic synthetic state | **awaiting visual confirmation** — `qlmanage -p` cannot drive this from a non-GUI shell |
 
 ### Foreign archives are now declined, not overpainted
@@ -646,6 +646,80 @@ non-GUI shell. Read the timings with:
 log show --last 10m --style compact \
   --predicate 'subsystem == "com.niivue.mobile.QuickLookPreview"'
 ```
+
+## Milestone 8 — system verification (2026-08-01, automated half complete)
+
+### Routing: 34/34, and it is now a repeatable script
+
+`scripts/check-quicklook-routing.sh` builds the awkward filenames this milestone
+calls for, resolves each one's type through `URLResourceValues.contentType` —
+the same call `PreviewViewController` makes — and compares against the appex's
+own `QLSupportedContentTypes`. It is the automatable half; Finder invocation
+still needs a spacebar sweep, and the script leaves its fixture directory in
+place and prints the `open` command for exactly that.
+
+Results worth recording, because they were assumptions until now:
+
+| Case | Resolves to | |
+| --- | --- | --- |
+| `UPPER.NII`, `MiXeD.NiI` | `gov.nih.nifti-1` | **extension matching is case-insensitive** |
+| `double.NII.GZ` | `org.gnu.gnu-zip-archive` | so is the compound form |
+| `with spaces.nii`, `sujet-café-ø-日本.nii`, a 180-character name | `gov.nih.nifti-1` | routing is unaffected by the filename |
+| `readonly.nii` (mode 444) | `gov.nih.nifti-1` | |
+| `detached.hdr` / `.img` / `.mhd` / `.nhdr`, `afni.HEAD` / `.BRIK` | radiance / disk-image / metaimage-header / dyn | **not claimed** — Milestone 6 decision holds |
+| `.white`, `.pial`, `.inflated`, `.sphere`, `.obj`, `.stl`, `.ply`, `.zip`, `.txt` | various | not intercepted |
+
+The script itself had a defect on first run worth remembering: its Swift probe
+failed to compile, no rows were produced, and it printed **"All fixtures route
+as expected"** — a zero-row pass. It now asserts the resolved count against the
+fixture count, because silence is the one result that looks identical to
+success.
+
+### Exit-gate audit — "no X remains"
+
+Checked by grep against `NiiVue/QuickLookPreview/`, the preview page, and the
+built bundle:
+
+| Must not remain | Result |
+| --- | --- |
+| Private API / WebKit KVC | none |
+| Base64 document transport | none — no `base64`, `atob`, `btoa`, or `Data(base64:)` anywhere in the extension or the preview page |
+| Network use in extension source | none — no `URLSession`, `NWConnection`, or equivalent |
+| Broad file entitlement | the extension holds `app-sandbox`, `files.user-selected.read-only`, and `network.client` and nothing else |
+| Blank failure state | every path ends in a panel; covered by the suite |
+| Stale completion | generation-scoped, Milestone 3 |
+| Retained file descriptor | `serve()` closes in a `defer` on every exit including cancellation |
+
+**Correction to the Milestone 2 gate.** That round recorded "zero remote URLs"
+in the preview's chunks. The preview *entry* chunk is indeed clean, but the
+shared `niivue-*.js` chunk contains two `http://` strings:
+`http://www.w3.org/2000/svg` (an XML namespace passed to `createElementNS`) and
+`http://localhost/` (a parse base for `new URL(relative, base)` in
+`slide/NVSlide.ts`, whole-slide imaging, a path the preview never enters).
+Neither is fetched, so the conclusion stands — but "zero remote URLs" was an
+overstatement and the earlier check was too narrow.
+
+**On `files.user-selected.read-only`:** kept. It is the narrowest file
+entitlement available, matches Apple's own Quick Look extension template, and
+grants nothing in the absence of a user selection, which this extension never
+performs — the previewed file arrives through Quick Look's own sandbox token
+(proved in Milestone 0.5). Removing it is a plausible tightening but would need
+a Finder run to validate, so it is recorded rather than done.
+
+### Documentation
+
+`README.md` now documents supported formats, neurological orientation and the
+centred crosshair, frame-zero behaviour with the `frames 1 of N` reporting, the
+metadata-only fallbacks, both resource limits, the non-NIfTI `.gz`
+hand-back, the deferred list with reasons, and a troubleshooting block
+(`pluginkit`, `lsregister`, `qlmanage -r`, and the `log show` predicate).
+
+### Still requiring a Finder run
+
+Everything Finder-facing, because `qlmanage -p` emits nothing from a non-GUI
+shell: per-format invocation, Space/Escape/resize behaviour, discovery after
+clean install and reboot, the ≤2 s timing gate, twenty open/dismiss cycles, and
+confirmation that a `.tar.gz` is not overpainted.
 
 ## Regression coverage added for Milestones 3–5, 7
 

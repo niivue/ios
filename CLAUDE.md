@@ -546,7 +546,12 @@ address reuse. The dispatched closure holds the task strongly until after
 landed** (2026-08-01), Milestone 6 **dropped** (no detached formats in v1 —
 `.hdr` is Apple's Radiance image type and `.img` its disk-image type, so
 claiming them is not acceptable; `.mhd` was un-claimed as a consequence).
-Milestone 8 (system verification) is next.
+Milestone 8's automated half is done — `./scripts/check-quicklook-routing.sh`
+verifies 34 routing fixtures (uppercase, compound, Unicode, spaces, long names,
+read-only, and the negative cases) against the appex's own claimed types, and
+`README.md` documents formats, fallbacks, limits and troubleshooting. What
+remains is Finder-only: per-format spacebar sweep, discovery after reinstall and
+reboot, the timing gate, and twenty open/dismiss cycles.
 The extension does **not** ship yet — `README.md` describes it, so treat that as
 planned, not delivered.
 
