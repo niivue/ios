@@ -453,10 +453,71 @@ speculatively.
 Still open for Milestone 5: mesh and tract requests are **declined**
 (`unsupported`) rather than mis-drawn as an empty render tile.
 
-## Regression coverage added for Milestones 3–4
+## Milestone 5 results — mesh and streamline previews landed (2026-08-01)
+
+Delivered: `loadMeshes` for GIFTI/MZ3 geometry and the TCK/TRK/TRX tract
+readers, render-only mode filling the panel, and geometry metadata —
+vertices/triangles for a surface, streamlines/points for a bundle, plus the
+bounding-box extent in mm for both.
+
+- **No camera fitting code was needed, and none was written.** NiiVue derives
+  its orthographic frustum from the object's own extents
+  (`baseScale = 0.8 * furthestFromPivot`, `math/NVTransforms.ts`), so the
+  default `scaleMultiplier` of 1 already *is* the fitted view. Verified against
+  bundles that sit well off the origin (`colby.trx` spans x 78–192 mm): fitted
+  *and* centred.
+- **Orbit and zoom come free** from NiiVue's own handlers. The page's overlays
+  are `display: none` when hidden, so the canvas keeps its pointer events —
+  worth knowing before anyone "fixes" the overlay CSS.
+- Tract counts come from `mesh.trx`, never from `positions`/`indices`: for a
+  tract those are the tessellated *cylinder* vertices NiiVue generates, so
+  reporting them would describe the renderer rather than the file. A 24k-
+  streamline bundle has 580,968 points and 4.2 M cylinder positions.
+
+### Two settings are turned OFF for geometry, and this is deliberate
+
+Both earn their place on a volume preview and are clutter on a geometry one:
+
+- `is3DCrosshairVisible = false` — the crosshair marks a slice position that
+  does not exist without a volume, and rendered as red stubs poking out of the
+  surface. Safe **only** in this branch: per the crosshair trap in `CLAUDE.md`
+  that flag gates *every* crosshair, and the mesh path has no 2D tiles.
+- `meshXRay = 0` — the constructor sets 0.05 so the crosshair can be traced
+  through a volume render. With a *mesh* loaded, that same pass redraws the
+  mesh over itself with depth testing disabled: the surface washes out and
+  tract colouring desaturates visibly. Compare before/after if this is ever
+  reverted; the difference is not subtle.
+
+### Layer-only GIFTI, measured
+
+A GIFTI carrying only scalars **loads cleanly** rather than throwing:
+`kind: 'mesh'`, `positions.length === 0`, `layers.length === 1`, extents `NaN`.
+So the contract's "do not search the filesystem for a companion surface" needs
+no filesystem discipline at all — just a `positions.length < 9` check, which
+reports *"it holds per-vertex data but no surface"* rather than calling the file
+damaged.
+
+### Known gap: gzipped GIFTI is declined
+
+`.gii.gz` resolves to `org.gnu.gnu-zip-archive` and `GzipPeek`/`VolumeSniff`
+correctly finds no NIfTI magic, so it is handed back to whatever else previews
+archives. Loosening the sniff to inspect for GIFTI XML is possible but is
+exactly what the Milestone 1 standing obligation forbids without an owner
+decision, so it is recorded here rather than fixed. `.mz3` is unaffected — its
+gzip is internal to the format and the extension stays `.mz3`.
+
+### Exit gate
+
+| Criterion | Status |
+| --- | --- |
+| Every mesh/tract fixture is visible, centred, interactively rotatable | **pass** — lit-pixel counts per fixture; a synthetic drag changes the rendered frame |
+| Resizing does not crop or blur the render | **pass** — the drawing buffer tracks CSS size × DPR after a viewport change, and the render survives it |
+| Layer-only and malformed GIFTI produce an accurate fallback | **pass** |
+
+## Regression coverage added for Milestones 3–5
 
 `NiiVue/React/tests/preview-regression.mjs`, run with `npm run test:preview`.
-**48 checks, all passing.** Same shape as `bridge-regression.mjs`: it drives the
+**75 checks, all passing.** Same shape as `bridge-regression.mjs`: it drives the
 built `dist/` in headless Chromium over a throwaway http server, so it exercises
 the bytes the extension bundles.
 
@@ -473,11 +534,16 @@ Two things in it are worth not rediscovering:
   have to do.
 - **Fixtures are generated, not collected** — `tests/preview-fixtures.mjs`
   writes NIfTI-1 files with exact dims, spacing, affine, datatype and
-  truncation. R4 in this plan notes that five of the eight v1 families have no
-  fixture anywhere in the monorepo; for the *properties* under test (4D,
-  complex, zero-dimension, truncated) no real scan is more precise than a
+  truncation, plus GIFTI surfaces and the layer-only variant. R4 in this plan
+  notes that five of the eight v1 families have no fixture anywhere in the
+  monorepo; for the *properties* under test (4D, complex, zero-dimension,
+  truncated, geometry-less GIFTI) no real scan is more precise than a
   synthesised one, and Milestone 0 already allows a deterministic generation
   step in place of a redistributable file.
+- **The mesh/tract reader checks do need real files** and read them from the
+  private Git-LFS `dev-images` package by absolute path. When it is absent the
+  suite prints `SKIP` and says which path was missing rather than quietly
+  passing with less coverage.
 
 What it still does not cover is everything native: the chunked reads, the
 document token, security scope, the Quick Look completion gate and the timeouts

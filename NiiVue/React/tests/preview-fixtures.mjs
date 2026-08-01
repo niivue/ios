@@ -90,3 +90,57 @@ export function nifti1(spec) {
 
   return spec.truncateTo === undefined ? buffer : buffer.subarray(0, spec.truncateTo)
 }
+
+/**
+ * A GIFTI surface, or — with no geometry — the layer-only file the product
+ * contract singles out: one that supplies scalars and expects a viewer to go
+ * looking for a companion surface, which this preview must refuse to do.
+ *
+ * ASCII encoding keeps the fixture readable and sidesteps base64 endianness.
+ * NiiVue's reader defaults an absent `Dim2` to 1, so the conventional
+ * `Dimensionality="2"` form is what it expects.
+ */
+function dataArray(intent, dataType, dims, values) {
+  const dimAttrs = dims.map((d, i) => `Dim${i}="${d}"`).join(' ')
+  return `  <DataArray Intent="${intent}" DataType="${dataType}"
+    ArrayIndexingOrder="RowMajorOrder" Dimensionality="${dims.length}" ${dimAttrs}
+    Encoding="ASCII" Endian="LittleEndian" ExternalFileName="" ExternalFileOffset="">
+    <Data>${values.join(' ')}</Data>
+  </DataArray>`
+}
+
+export function gifti(spec) {
+  const arrays = []
+  if (spec.vertices) {
+    arrays.push(
+      dataArray('NIFTI_INTENT_POINTSET', 'NIFTI_TYPE_FLOAT32', [spec.vertices.length / 3, 3], spec.vertices),
+    )
+  }
+  if (spec.triangles) {
+    arrays.push(
+      dataArray('NIFTI_INTENT_TRIANGLE', 'NIFTI_TYPE_INT32', [spec.triangles.length / 3, 3], spec.triangles),
+    )
+  }
+  if (spec.scalars) {
+    arrays.push(dataArray('NIFTI_INTENT_SHAPE', 'NIFTI_TYPE_FLOAT32', [spec.scalars.length], spec.scalars))
+  }
+  return Buffer.from(
+    `<?xml version="1.0" encoding="UTF-8"?>
+<GIFTI Version="1.0" NumberOfDataArrays="${arrays.length}">
+${arrays.join('\n')}
+</GIFTI>
+`,
+    'utf8',
+  )
+}
+
+/** A closed octahedron, big enough in mm to look like something on screen. */
+export function octahedron(radius = 40) {
+  const r = radius
+  const vertices = [r, 0, 0, -r, 0, 0, 0, r, 0, 0, -r, 0, 0, 0, r, 0, 0, -r]
+  const triangles = [
+    0, 2, 4, 2, 1, 4, 1, 3, 4, 3, 0, 4,
+    2, 0, 5, 1, 2, 5, 3, 1, 5, 0, 3, 5,
+  ]
+  return { vertices, triangles }
+}

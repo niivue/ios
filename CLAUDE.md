@@ -542,15 +542,25 @@ address reuse. The dispatched closure holds the task strongly until after
 
 ## Quick Look preview extension (in progress)
 
-`quicklook_plan.md` is the plan and the record. Status: **Milestones 0.5–4
-landed** (2026-08-01); Milestone 5 (mesh and streamline previews) is next. The
-extension does **not** ship yet — `README.md` describes it, so treat that as
+`quicklook_plan.md` is the plan and the record. Status: **Milestones 0.5–5
+landed** (2026-08-01); Milestone 6 (detached `.mhd` feasibility gate) is next.
+The extension does **not** ship yet — `README.md` describes it, so treat that as
 planned, not delivered.
 
 Web-side checks for the preview live in
-`NiiVue/React/tests/preview-regression.mjs` (`npm run test:preview`, 48 checks)
-with generated NIfTI fixtures in `tests/preview-fixtures.mjs`. They are separate
-from `test:bridge` because the two pages share no code.
+`NiiVue/React/tests/preview-regression.mjs` (`npm run test:preview`, 75 checks)
+with generated NIfTI/GIFTI fixtures in `tests/preview-fixtures.mjs`. They are
+separate from `test:bridge` because the two pages share no code. The mesh and
+tract checks read real files from the private Git-LFS `dev-images` package by
+absolute path and print `SKIP` when it is absent.
+
+**The preview turns `is3DCrosshairVisible` and `meshXRay` OFF for geometry**
+(`quicklook.ts`, mesh branch only). Both are correct for a volume and wrong for
+a mesh: the crosshair marks a slice position that does not exist and shows as
+red stubs through the surface, and `meshXRay` redraws the mesh over itself with
+depth testing disabled, washing out surfaces and desaturating tract colour. The
+crosshair flag is safe to clear there *only* because that branch has no 2D
+tiles — see the crosshair trap above.
 
 Facts from the spike that are expensive to rediscover:
 

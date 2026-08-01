@@ -8,10 +8,10 @@
  * mean shipping the drawing and export paths into an extension that must not
  * have them.
  *
- * Milestone 4 scope: voxel previews. NIfTI, MGH/MGZ, NRRD and MetaImage load
- * through one path — every NiiVue volume reader normalizes into a NIfTI header
- * — into a fixed 2×2 layout, with sanitized header metadata in the strip.
- * Meshes and tracts are Milestone 5.
+ * Milestone 5 scope: voxel and geometry previews. NIfTI, MGH/MGZ, NRRD and
+ * MetaImage load through one path — every NiiVue volume reader normalizes into
+ * a NIfTI header — into a fixed 2×2 layout. GIFTI, MZ3 and the tract formats
+ * take a single fitted 3D render. Both report sanitized metadata in the strip.
  */
 import {
   NiiVue,
@@ -19,8 +19,9 @@ import {
   SLICE_TYPE,
   type CustomLayoutTile,
   type NVImage,
+  type NVMesh,
 } from '@niivue/niivue'
-import { describeVolume } from './preview-metadata'
+import { describeMesh, describeVolume } from './preview-metadata'
 
 /** Native → page. One request per preview; the host never sends a second. */
 export interface PreviewRequest {
@@ -188,14 +189,66 @@ const QUADRANTS: CustomLayoutTile[] = [
   { sliceType: SLICE_TYPE.RENDER, position: [0.5, 0.5, 0.5, 0.5] },
 ]
 
+/**
+ * Meshes and tract bundles: one fitted 3D render filling the panel.
+ *
+ * No camera fitting is done here on purpose. NiiVue derives its orthographic
+ * frustum from the object's own extents (`baseScale = 0.8 * furthestFromPivot`
+ * in `math/NVTransforms.ts`), so `scaleMultiplier` at its default of 1 already
+ * *is* the fitted view. Orbit and zoom then come free from NiiVue's own
+ * handlers — the overlays are `display: none` when hidden, so the canvas keeps
+ * the pointer events.
+ */
+async function renderMesh(instance: NiiVue, request: PreviewRequest): Promise<void> {
+  let mesh: NVMesh
+  try {
+    await instance.loadMeshes([{ url: request.url, name: request.displayName }])
+    if (settled) return
+    if (instance.meshes.length === 0) {
+      fail('unsupported', 'no mesh produced')
+      return
+    }
+    mesh = instance.meshes[0]
+  } catch (error) {
+    if (settled) return
+    fail('unreadable', error instanceof Error ? error.message : String(error))
+    return
+  }
+
+  const summary = describeMesh(mesh, request.displayName, request.fileSize)
+  settled = true
+  stage.loading.hidden = true
+
+  if (!summary.displayable) {
+    showMetadataOnly(request.displayName, summary.pairs, summary.reason ?? 'no geometry')
+    post({ stage: 'loaded', metadata: { ...summary.pairs, displayable: 'false' } })
+    return
+  }
+
+  // Render-only: no slice tiles, so no custom layout either.
+  instance.customLayout = null
+  instance.sliceType = SLICE_TYPE.RENDER
+  // Both of these earn their place on a *volume* preview and are clutter on a
+  // geometry one. The crosshair marks a slice position that does not exist
+  // here, and shows up as red stubs poking out of the surface; `meshXRay` gates
+  // a depth-disabled pass that, with a mesh loaded, redraws the mesh over
+  // itself and washes it out. Turning them off is safe in this branch
+  // precisely because there are no 2D tiles — `is3DCrosshairVisible` gates
+  // every crosshair, not only the 3D one.
+  instance.is3DCrosshairVisible = false
+  instance.meshXRay = 0
+  showMetadata(request.displayName, summary.pairs)
+  instance.drawScene()
+  post({ stage: 'loaded', metadata: { ...summary.pairs, displayable: 'true' } })
+}
+
 async function render(request: PreviewRequest): Promise<void> {
   if (!nv) {
     fail('graphics-unavailable')
     return
   }
   if (request.family === 'mesh') {
-    // Milestone 5. Saying so is better than drawing an empty render tile.
-    fail('unsupported', 'mesh')
+    await renderMesh(nv, request)
     return
   }
   let volume: NVImage

@@ -21,7 +21,8 @@ import { readFile, stat } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { join, extname, normalize, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { nifti1 } from './preview-fixtures.mjs'
+import { existsSync } from 'node:fs'
+import { nifti1, gifti, octahedron } from './preview-fixtures.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DIST = join(HERE, '..', 'dist')
@@ -47,7 +48,27 @@ const FIXTURES = {
   // Header promises a full volume; the data stops a third of the way in.
   'truncated.nii': nifti1({ dims: [24, 28, 20], truncateTo: 352 + 24 * 28 * 20 / 3 }),
   'garbage.nii': Buffer.from('not a volume in any format niivue reads '.repeat(64)),
+  'surface.gii': gifti(octahedron()),
+  // The case the contract singles out: per-vertex values for a surface the file
+  // does not contain. It must NOT send us looking for a companion.
+  'layer.gii': gifti({ scalars: [0, 1, 2, 3, 4, 5] }),
+  'garbage.mz3': Buffer.from('not a mesh '.repeat(64)),
 }
+
+/**
+ * Real mesh and tract fixtures live in the monorepo's private Git-LFS
+ * dev-images package, which cannot be redistributed into this repo (R4 in the
+ * plan). The checks that need them are skipped, loudly, when it is absent — a
+ * synthetic octahedron proves the GIFTI path but says nothing about whether
+ * NiiVue's mz3/tck/trk/trx readers produce something visible.
+ */
+const LFS_MESHES = '/Users/chris/src/mono/packages/dev-images/images/meshes'
+const REAL_MESHES = [
+  ['cortex_5124.mz3', 'surface'],
+  ['tract.SLF1_R.tck', 'streamlines'],
+  ['tract.IFOF_R.trk', 'streamlines'],
+  ['colby.trx', 'streamlines'],
+]
 
 const MIME = {
   '.html': 'text/html',
@@ -63,6 +84,8 @@ const server = createServer(async (req, res) => {
     if (path.startsWith('/fixtures/')) {
       body = FIXTURES[path.slice('/fixtures/'.length)]
       if (!body) throw new Error('no such fixture')
+    } else if (path.startsWith('/meshes/')) {
+      body = await readFile(join(LFS_MESHES, path.slice('/meshes/'.length)))
     } else if (path.startsWith('/samples/')) {
       body = await readFile(join(SAMPLES, path.slice('/samples/'.length)))
     } else {
@@ -270,10 +293,84 @@ check('an unreadable document posts `unreadable`', result.message?.code === 'unr
 check('the fallback panel is visible', await result.page.locator('#fallback').isVisible())
 await result.page.close()
 
-// --- 9. Meshes are declined until Milestone 5 ------------------------------
-result = await preview(`${base}/fixtures/basic.nii`, 'surface.mz3', { family: 'mesh' })
-check('a mesh request is declined, not mis-drawn', result.message?.code === 'unsupported', result.message?.code)
+// --- 9. Geometry: a synthetic surface renders and reports its counts -------
+result = await preview(`${base}/fixtures/surface.gii`, 'surface.gii', { family: 'mesh', fileSize: 900 })
+meta = result.message?.metadata ?? {}
+check('a GIFTI surface loads', result.message?.stage === 'loaded', result.message?.stage)
+check('it is displayable', meta.displayable === 'true', meta.displayable)
+check('it is described as a surface', meta.kind === 'surface', meta.kind)
+check('vertex count is exact', meta.vertices === '6', meta.vertices)
+check('triangle count is exact', meta.triangles === '8', meta.triangles)
+check('extent is reported in mm', meta.extent === '80×80×80 mm', meta.extent)
+check('the render is visible', (await quadrantPixels(result.page)).reduce((a, b) => a + b) > 500)
 await result.page.close()
+
+// --- 10. Layer-only GIFTI: metadata, and no hunt for a companion ----------
+result = await preview(`${base}/fixtures/layer.gii`, 'layer.gii', { family: 'mesh' })
+meta = result.message?.metadata ?? {}
+let detail = await result.page.locator('#fallback-detail').innerText()
+check('a layer-only GIFTI is not an error', result.message?.stage === 'loaded', result.message?.stage)
+check('it falls back to metadata', meta.displayable === 'false', meta.displayable)
+check('it says the surface is missing, not that the file is bad', /per-vertex data but no surface/.test(detail), detail)
+check('it reports the layer it does have', meta.layers === '1', meta.layers)
+await result.page.close()
+
+result = await preview(`${base}/fixtures/garbage.mz3`, 'garbage.mz3', { family: 'mesh' })
+check('a malformed mesh fails visibly', result.message?.stage === 'failed', result.message?.code)
+check('and shows a panel', await result.page.locator('#fallback').isVisible())
+await result.page.close()
+
+// --- 11. Real mesh and tract readers, when the LFS fixtures are present ---
+if (!existsSync(LFS_MESHES)) {
+  console.log(`SKIP  real mesh/tract fixtures — ${LFS_MESHES} not present`)
+} else {
+  for (const [file, kind] of REAL_MESHES) {
+    result = await preview(`${base}/meshes/${file}`, file, { family: 'mesh' })
+    meta = result.message?.metadata ?? {}
+    const lit = (await quadrantPixels(result.page)).reduce((a, b) => a + b)
+    check(`${file} loads`, result.message?.stage === 'loaded', result.message?.stage ?? result.message?.code)
+    check(`${file} is a ${kind}`, meta.kind === kind, meta.kind)
+    // Two of these bundles sit well off the origin; a render that is fitted but
+    // not centred would be off-screen, so this is the check that catches it.
+    check(`${file} is visible on screen`, lit > 500, `${lit} lit px`)
+    await result.page.close()
+  }
+}
+
+// --- 12. Rotatable and resizable ------------------------------------------
+result = await preview(`${base}/fixtures/surface.gii`, 'surface.gii', { family: 'mesh' })
+page = result.page
+const before = (await page.locator('#gl').screenshot({ type: 'png' })).toString('base64')
+const box = await page.locator('#gl').boundingBox()
+await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+await page.mouse.down()
+for (let i = 1; i <= 10; i++) {
+  await page.mouse.move(box.x + box.width / 2 + i * 8, box.y + box.height / 2 + i * 3)
+}
+await page.mouse.up()
+await page.waitForTimeout(300)
+const after = (await page.locator('#gl').screenshot({ type: 'png' })).toString('base64')
+check('a drag orbits the render', before !== after)
+
+// Finder resizes the panel freely; the drawing buffer must follow, or the
+// render is upscaled and soft.
+await page.setViewportSize({ width: 940, height: 700 })
+await page.waitForTimeout(400)
+const sharp = await page.evaluate(() => {
+  const c = document.getElementById('gl')
+  const ratio = window.devicePixelRatio || 1
+  return {
+    backing: [c.width, c.height],
+    css: [Math.round(c.clientWidth * ratio), Math.round(c.clientHeight * ratio)],
+  }
+})
+check(
+  'the drawing buffer follows a resize',
+  sharp.backing[0] === sharp.css[0] && sharp.backing[1] === sharp.css[1],
+  `${sharp.backing} vs ${sharp.css}`,
+)
+check('and the render survives it', (await quadrantPixels(page)).reduce((a, b) => a + b) > 500)
+await page.close()
 
 await browser.close()
 server.close()

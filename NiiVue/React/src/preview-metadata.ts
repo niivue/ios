@@ -10,7 +10,7 @@
  * Every NiiVue volume reader normalizes into a NIfTI header, so one extractor
  * covers NIfTI, MGH/MGZ, NRRD and MetaImage alike.
  */
-import { NiiDataType, type NVImage } from '@niivue/niivue'
+import { NiiDataType, type NVImage, type NVMesh } from '@niivue/niivue'
 
 /** Terse names; the strip is narrow. `getDatatypeCodeString` is far too wordy. */
 const datatypeNames: Record<number, string> = {
@@ -171,6 +171,56 @@ export function describeVolume(
   const expected = volume.nVox3D * loadedFrames * (componentsPerVoxel[hdr.datatypeCode] ?? 1)
   if (Number.isFinite(expected) && volume.img.length < expected) {
     return { pairs, displayable: false, reason: 'the file is incomplete' }
+  }
+  return { pairs, displayable: true }
+}
+
+/**
+ * Geometry summary for a mesh or a tract bundle.
+ *
+ * The two are one NiiVue species apart and need different numbers: a surface is
+ * described by vertices and triangles, a bundle by streamlines and points.
+ * Reporting a tract's `positions` would be misleading — those are the
+ * tessellated cylinder vertices NiiVue generates, not anything in the file.
+ */
+export function describeMesh(
+  mesh: NVMesh,
+  fileName: string,
+  fileSize: number | undefined,
+): VolumeSummary {
+  const pairs: Record<string, string> = { format: formatName(fileName) }
+
+  if (mesh.kind === 'tract' && mesh.trx) {
+    pairs.kind = 'streamlines'
+    pairs.streamlines = String(Math.max(0, mesh.trx.offsets.length - 1))
+    pairs.points = String(mesh.trx.vertices.length / 3)
+  } else {
+    pairs.kind = 'surface'
+    pairs.vertices = String(mesh.positions.length / 3)
+    pairs.triangles = String(mesh.indices.length / 3)
+    if (mesh.layers.length > 0) pairs.layers = String(mesh.layers.length)
+  }
+
+  const min = mesh.extentsMin
+  const max = mesh.extentsMax
+  const extent = [0, 1, 2].map((i) => max[i] - min[i])
+  if (extent.every((v) => Number.isFinite(v))) {
+    pairs.extent = `${extent.map(trim).join('×')} mm`
+  }
+  if (fileSize !== undefined && fileSize >= 0) pairs.size = formatBytes(fileSize)
+
+  // A GIFTI holding only scalars or labels loads cleanly with no geometry at
+  // all. The contract is explicit that this shows metadata and does NOT go
+  // looking through the filesystem for the surface those values belong to.
+  if (mesh.positions.length < 9) {
+    return {
+      pairs,
+      displayable: false,
+      reason:
+        mesh.layers.length > 0
+          ? 'it holds per-vertex data but no surface'
+          : 'it holds no geometry',
+    }
   }
   return { pairs, displayable: true }
 }
