@@ -19,6 +19,8 @@
 		34CD18132B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CD18122B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift */; };
 		QL00000000000000000011 /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = QL00000000000000000001 /* PreviewViewController.swift */; };
 		QL00000000000000000012 /* GzipPeek.swift in Sources */ = {isa = PBXBuildFile; fileRef = QL00000000000000000006 /* GzipPeek.swift */; };
+		QL00000000000000000013 /* PreviewSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = QL00000000000000000007 /* PreviewSchemeHandler.swift */; };
+		QL00000000000000000015 /* dist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 3485664C2B5426A4008EF4DD /* dist */; };
 		QL00000000000000000014 /* QuickLookPreview.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = QL00000000000000000004 /* QuickLookPreview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -44,6 +46,20 @@
 			remoteGlobalIDString = QL00000000000000000003;
 			remoteInfo = QuickLookPreview;
 		};
+		WEB0000000000000000021 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 34CD17EA2B45C5400015EF4C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = WEB0000000000000000003;
+			remoteInfo = NiiVueWeb;
+		};
+		WEB0000000000000000023 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 34CD17EA2B45C5400015EF4C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = WEB0000000000000000003;
+			remoteInfo = NiiVueWeb;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -55,6 +71,16 @@
 			files = (
 				34C48D4F2BF297FD00486C4E /* samples in CopyFiles */,
 				3485664D2B5426A4008EF4DD /* dist in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		QL00000000000000000033 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 7;
+			files = (
+				QL00000000000000000015 /* dist in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -90,6 +116,7 @@
 		34CD18122B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiiVueUITestsLaunchTests.swift; sourceTree = "<group>"; };
 		QL00000000000000000001 /* PreviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewViewController.swift; sourceTree = "<group>"; };
 		QL00000000000000000006 /* GzipPeek.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GzipPeek.swift; sourceTree = "<group>"; };
+		QL00000000000000000007 /* PreviewSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewSchemeHandler.swift; sourceTree = "<group>"; };
 		QL00000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		QL00000000000000000004 /* QuickLookPreview.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = QuickLookPreview.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		QL00000000000000000005 /* QuickLookPreview.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QuickLookPreview.entitlements; sourceTree = "<group>"; };
@@ -172,6 +199,7 @@
 				QL00000000000000000002 /* Info.plist */,
 				QL00000000000000000001 /* PreviewViewController.swift */,
 				QL00000000000000000006 /* GzipPeek.swift */,
+				QL00000000000000000007 /* PreviewSchemeHandler.swift */,
 			);
 			path = QuickLookPreview;
 			sourceTree = "<group>";
@@ -209,7 +237,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 34CD18162B45C5420015EF4C /* Build configuration list for PBXNativeTarget "NiiVue" */;
 			buildPhases = (
-				348566412B51A4EB008EF4DD /* ShellScript */,
 				348566422B51A6E7008EF4DD /* CopyFiles */,
 				34CD17EE2B45C5400015EF4C /* Sources */,
 				34CD17EF2B45C5400015EF4C /* Frameworks */,
@@ -219,6 +246,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				WEB0000000000000000022 /* PBXTargetDependency */,
 				QL00000000000000000022 /* PBXTargetDependency */,
 			);
 			name = NiiVue;
@@ -266,6 +294,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = QL00000000000000000061 /* Build configuration list for PBXNativeTarget "QuickLookPreview" */;
 			buildPhases = (
+				QL00000000000000000033 /* CopyFiles */,
 				QL00000000000000000042 /* Sources */,
 				QL00000000000000000041 /* Frameworks */,
 				QL00000000000000000043 /* Resources */,
@@ -273,6 +302,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				WEB0000000000000000024 /* PBXTargetDependency */,
 			);
 			name = QuickLookPreview;
 			productName = QuickLookPreview;
@@ -280,6 +310,20 @@
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXAggregateTarget section */
+		WEB0000000000000000003 /* NiiVueWeb */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = WEB0000000000000000061 /* Build configuration list for PBXAggregateTarget "NiiVueWeb" */;
+			buildPhases = (
+				WEB0000000000000000001 /* ShellScript */,
+			);
+			dependencies = (
+			);
+			name = NiiVueWeb;
+			productName = NiiVueWeb;
+		};
+/* End PBXAggregateTarget section */
 
 /* Begin PBXProject section */
 		34CD17EA2B45C5400015EF4C /* Project object */ = {
@@ -318,6 +362,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				WEB0000000000000000003 /* NiiVueWeb */,
 				34CD17F12B45C5400015EF4C /* NiiVue */,
 				QL00000000000000000003 /* QuickLookPreview */,
 				34CD18012B45C5420015EF4C /* NiiVueTests */,
@@ -377,6 +422,23 @@
 			shellPath = /bin/sh;
 			shellScript = "# Xcode launched from Finder/Dock does not inherit a login shell PATH,\n# so Homebrew's node/npm are invisible without this.\nexport PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"\ncd ./React\nif ! command -v npm >/dev/null 2>&1; then\n  echo \"error: npm not found. Install Node.js 20.19+/22.13+/24+ or add it to PATH.\" >&2\n  exit 1\nfi\n# dist/ and node_modules/ are gitignored, so a fresh clone needs the install.\n[ -d node_modules ] || npm ci\nnpm run build\n";
 		};
+		WEB0000000000000000001 /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# One web build, shared by the app and the Quick Look extension.\n# Both bundle React/dist; if each ran its own build phase they would race to\n# rewrite the same gitignored directory during a parallel build.\nexport PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"\ncd \"$SRCROOT/React\"\nif ! command -v npm >/dev/null 2>&1; then\n  echo \"error: npm not found. Install Node.js 20.19+/22.13+/24+ or add it to PATH.\" >&2\n  exit 1\nfi\n# dist/ and node_modules/ are gitignored, so a fresh clone needs the install.\n[ -d node_modules ] || npm ci\nnpm run build\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -413,6 +475,7 @@
 			files = (
 				QL00000000000000000011 /* PreviewViewController.swift in Sources */,
 				QL00000000000000000012 /* GzipPeek.swift in Sources */,
+				QL00000000000000000013 /* PreviewSchemeHandler.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -433,6 +496,16 @@
 			isa = PBXTargetDependency;
 			target = 34CD17F12B45C5400015EF4C /* NiiVue */;
 			targetProxy = 34CD180D2B45C5420015EF4C /* PBXContainerItemProxy */;
+		};
+		WEB0000000000000000022 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = WEB0000000000000000003 /* NiiVueWeb */;
+			targetProxy = WEB0000000000000000021 /* PBXContainerItemProxy */;
+		};
+		WEB0000000000000000024 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = WEB0000000000000000003 /* NiiVueWeb */;
+			targetProxy = WEB0000000000000000023 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -749,6 +822,20 @@
 			};
 			name = Release;
 		};
+		WEB0000000000000000062 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		WEB0000000000000000063 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -793,6 +880,15 @@
 			buildConfigurations = (
 				QL00000000000000000062 /* Debug */,
 				QL00000000000000000063 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		WEB0000000000000000061 /* Build configuration list for PBXAggregateTarget "NiiVueWeb" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				WEB0000000000000000062 /* Debug */,
+				WEB0000000000000000063 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

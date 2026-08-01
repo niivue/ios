@@ -197,7 +197,7 @@ builds.
 | Fixture | Resolves to | |
 | --- | --- | --- |
 | `.nii` | `gov.nih.nifti-1` (Apple's) | routed |
-| **`.nii.gz`** | **`org.gnu.gnu-zip-archive`** | **NOT ROUTED** |
+| **`.nii.gz`** | **`org.gnu.gnu-zip-archive`** | **no dedicated type — see resolution** |
 | `.mgh` / `.mgz` | `edu.mgh.freesurfer.mgh` / `.mgz` | routed |
 | `.nrrd` | `org.nrrd.nrrd` | routed |
 | `.mha` / `.mhd` | `org.itk.metaimage` / `-header` | routed |
@@ -208,7 +208,12 @@ builds.
 Negative tests all pass — plain `.gz`, `.zip`, FreeSurfer `.white/.pial/.inflated/.sphere`,
 and `.obj/.stl/.ply` are **not** intercepted.
 
-### The `.nii.gz` failure is a platform limitation, not a bad declaration
+### `.nii.gz` gets no dedicated type — a platform limit, not a bad declaration
+
+**Wording note:** "`.nii.gz` does not route" would be too strong, and an earlier
+revision of this file said it. It routes fine *via the generic gzip type*. What
+is impossible is a **dedicated compound UTI**. Keep the distinction — the two
+readings imply completely different release gates.
 
 `gov.nih.nifti-1-gzip` **is** registered and **does** carry the
 `public.filename-extension` tag `nii.gz` — confirmed via `UTType`. It still never
@@ -265,7 +270,79 @@ Verified by compiling the real Swift implementation against real files:
 
 **Standing obligation:** because this extension now previews every `.gz` on the
 machine, `shouldRender` must stay strict. Do not loosen the sniff, and do not let
-a future milestone render on the strength of the filename.
+a future milestone render on the strength of the filename alone.
+
+#### Prior art — both comparable tools do exactly this
+
+Checked directly, and it independently validates the approach:
+
+- **NIfTIViewQL** (`/Users/chris/src/NIfTIViewQL`) declares
+  `gov.nih.nifti-1-gzip` tagged with **both `nii.gz` and bare `gz`**, and also
+  lists `org.gnu.gnu-zip-archive` in `QLSupportedContentTypes`. Its controller
+  then strips `.gz` and checks for an inner `.nii` — a **filename** test. For
+  anything else it **returns an `NSError`** so another extension can handle the
+  file.
+- **MIQ** (`/Users/chris/src/MIQ`) lists its narrow `org.nifti.nii-gz` *plus*
+  `public.gzip` and `org.gnu.gnu-zip-archive`, matches on full path suffix
+  (`.nii.gz`, `.mgh.gz`, `.mif.gz`) in `MIQFileKind.swift`, and documents the
+  broad `.gz` claim and its conflicts in its README.
+
+Two things follow. First, broad-gzip-plus-validation is the established solution,
+not a hack peculiar to this project. Second, **our discrimination is stronger
+than either**: both decide by filename, which mis-accepts a renamed file and
+mis-rejects a correctly-formed one, whereas `GzipPeek` reads the actual header.
+Keep it that way.
+
+NIfTIViewQL's decline-by-`NSError` is worth adopting for foreign archives: it
+hands a `.tar.gz` back to whatever would otherwise preview it, instead of
+replacing that with our own panel. Its being in shipping use is evidence Quick
+Look falls back cleanly.
+
+## Milestone 2 results — shell and shared web build landed (2026-08-01)
+
+Delivered:
+
+- **`NiiVueWeb` aggregate target** owns the single web build. The app's own
+  script phase was removed and both the app and the extension now depend on the
+  aggregate, so two targets can no longer race to rewrite the same gitignored
+  `dist/`. Verified by deleting `React/dist` entirely and doing a clean build:
+  it regenerates once and lands in both the app and the `.appex`.
+- **Vite multi-page build.** `index` + `quicklook` entries emit NiiVue as one
+  shared chunk (1.32 MB) with a 2 kB preview entry, instead of duplicating the
+  library into two bundles.
+- **`quicklook.html` + `src/quicklook.ts`** — loading shell with spinner,
+  adaptive metadata strip that wraps rather than clips, fallback panel, a
+  `ResizeObserver` that keeps the drawing buffer matched to the panel, and
+  `prefers-reduced-motion` handling.
+- **`PreviewSchemeHandler`** — bundle assets only, path-component containment,
+  `HTTPURLResponse` with a self-only CSP and `nosniff`, main-queue-confined task
+  callbacks. No document route exists in this milestone *by construction*.
+- **`PreviewViewController`** — typed `ready`/`loaded`/`failed` contract, a
+  single completion gate that cannot fire twice, a 10 s readiness timeout, and a
+  navigation delegate that allows only the bundled page.
+
+Kept separate from `bridge.ts` on purpose: the app's bridge is a two-way control
+surface with drawing and export paths, and a preview is read-only and
+single-shot. Sharing it would ship those paths into an extension that must not
+have them.
+
+### Exit gate
+
+| Criterion | Status |
+| --- | --- |
+| Clean build embeds the extension and both web entries | **pass** (verified from a deleted `dist/`) |
+| iOS Simulator / generic iOS device / Mac Catalyst all build | **pass** |
+| No network access in the runtime bundle | **pass** — the preview's own chunks (`quicklook-*.js`, `niivue-*.js`) contain **zero** remote URLs; the only hit anywhere is `https://react.dev` in the *app* entry, an unfetched React error link that the preview page never loads |
+| Spacebar shows the loading shell then a deterministic synthetic state | **awaiting visual confirmation** — `qlmanage -p` cannot drive this from a non-GUI shell |
+
+### Foreign archives are now declined, not overpainted
+
+Following NIfTIViewQL's shipping behaviour, a `.gz` that is not a NIfTI gets an
+`NSError` back from `preparePreviewOfFile` rather than our own panel, so a
+`.tar.gz` keeps whatever preview it would otherwise have had. The filename is
+consulted only when the *bytes* are inconclusive — a gzip variant `GzipPeek`
+cannot inflate — where a user who named a file `.nii.gz` is better served by a
+visible failure than by being told it is a foreign archive.
 
 ## Risks and open questions
 
@@ -548,20 +625,25 @@ Deliverables:
 - Probe each fixture with Launch Services/Finder on a clean install. Reuse a
   stable system UTI where one exists; otherwise define a namespaced type with
   the exact filename-extension tag.
-- Specifically prove that `.nii.gz` selects this extension without claiming
-  every generic gzip archive. Never register the extension for `public.gzip` as
-  a workaround.
+- Route `.nii.gz` by claiming `org.gnu.gnu-zip-archive` and discriminating on
+  **content**. (This supersedes an earlier "never register for `public.gzip`"
+  rule. That rule assumed a compound `nii.gz` UTI could work; it cannot — macOS
+  resolves a type from the last extension component only, so the choice is
+  broad-claim-plus-sniff or no `.nii.gz` preview at all. Owner-approved
+  2026-08-01. `public.gzip` itself is still not claimed; only
+  `org.gnu.gnu-zip-archive`, the type real files actually resolve to.)
 
 Exit gate:
 
 - Finder discovers and invokes the extension for every advertised v1 type.
-- Unrelated `.gz`, deferred FreeSurfer extensions, and common mesh files are not
-  intercepted.
+- Deferred FreeSurfer extensions and common mesh files are not intercepted, and
+  no type is claimed beyond the v1 matrix plus `org.gnu.gnu-zip-archive`.
 - The existing iOS device, iOS Simulator, and Mac Catalyst builds all still
   succeed. The extension target must not join the iOS destinations.
-- `.nii.gz` compound-extension routing works after clearing the Quick Look cache
-  and reinstalling the containing app. Failure blocks the release and triggers
-  a narrowly scoped UTI redesign.
+- **`.nii.gz` previews, and non-NIfTI gzip does not.** The gate is
+  content-sniffed routing, not resolution to a dedicated compound UTI — the
+  latter is impossible on macOS. Verify with a gzipped NIfTI, a `.tar.gz`, and a
+  plain `.gz`, after clearing the Quick Look cache and reinstalling the app.
 
 ### Milestone 2 — minimal preview shell and shared web build
 

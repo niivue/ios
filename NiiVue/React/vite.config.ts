@@ -17,5 +17,15 @@ export default defineConfig({
     // ...but keep it OUT of dist/: Xcode copies `NiiVue/samples` into the app
     // bundle separately, and duplicating a 4 MB volume would bloat the app.
     copyPublicDir: false,
+    rollupOptions: {
+      // Two entries, one build. The app page and the Quick Look preview page are
+      // separate documents but share NiiVue, so a multi-page build emits the
+      // library once as a common chunk instead of duplicating ~1.3 MB of it into
+      // both the app bundle and the extension bundle.
+      input: {
+        index: 'index.html',
+        quicklook: 'quicklook.html',
+      },
+    },
   },
 })
