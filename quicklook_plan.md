@@ -721,6 +721,59 @@ shell: per-format invocation, Space/Escape/resize behaviour, discovery after
 clean install and reboot, the ≤2 s timing gate, twenty open/dismiss cycles, and
 confirmation that a `.tar.gz` is not overpainted.
 
+## The "blue cast on drag" bug — WebKit selection, not graphics (2026-08-01)
+
+Reported symptom: rotating a preview far enough turns the whole panel — mesh,
+volume, and the black background — blue, and it stays that way. Reported first
+for `.mz3`, then observed on volumes too.
+
+**It is not a GL bug and not a regression from Milestone 5's two mesh settings.**
+Both were bisected across a full orientation sweep (azimuth 0–360° several times
+over, elevation to both ±90 limits) in real WebKit on the real Apple GPU:
+
+| Variant | Result |
+| --- | --- |
+| shipped (`is3DCrosshairVisible=false`, `meshXRay=0`) | grayscale everywhere, max channel spread 1/255 |
+| crosshair line removed | red crosshair returns; no tint |
+| xray line removed | identical to shipped |
+| both removed | red crosshair; no tint |
+| full NiiVue defaults | red crosshair + blue orient cube; still no whole-screen tint |
+
+Structurally that is expected: both skipped passes restore their own GL state
+(`gl/mesh.ts:305-306` restores `depthFunc`/`depthMask`), so skipping a
+self-restoring pass cannot leak state forward.
+
+**The cause is WebKit's text-selection highlight painted over the canvas.** A
+selection intersecting `<canvas id="gl">` tints the element's *entire box*:
+measured, a corner pixel goes from `[0,0,0]` to `[50,79,111]` and 99.8% of the
+panel turns blue — the reported symptom exactly. Two halves make it possible:
+
+- NiiVue's `pointerdown` handler never calls `preventDefault()`
+  (`control/interactions.ts:852`; the only `preventDefault` calls there are
+  contextmenu, wheel and dragover/drop). So a rotate-drag is, to WebKit, an
+  ordinary selection drag.
+- `quicklook.html` had no `user-select` rule, and the metadata strip sits
+  directly below the canvas as selectable content. Once the drag travels far
+  enough to extend the selection past the canvas, the canvas joins the range —
+  which is the "past some amount" threshold, and why it persists after mouse-up.
+
+**Fix:** `-webkit-user-select: none; user-select: none` on `html, body`.
+Verified against the rebuilt `dist/`: `selectAll` now leaves the corner at
+`[0,0,0]` and `getSelection().toString()` empty. Nothing in a Quick Look panel
+should be selectable; the strip's values remain exposed to VoiceOver through
+`aria-label`, so nothing is lost.
+
+**Caveat, recorded honestly:** the *appearance* mechanism is confirmed by
+measurement, and the missing guard is confirmed by inspection, but neither
+Chromium nor headless WebKit would start the selection from a *synthesized*
+drag (`rangeCount` stayed 0), so the final link — a real mouse drag creating
+that selection — is inferred rather than observed. One manual check settles it:
+rotate until the tint appears, then click once elsewhere. If it clears, it was a
+selection and this fix is exactly right.
+
+Upstream-adjacent: NiiVue arguably should `preventDefault()` on pointerdown for
+drags it consumes. The local fix stands alone regardless.
+
 ## Regression coverage added for Milestones 3–5, 7
 
 `NiiVue/React/tests/preview-regression.mjs`, run with `npm run test:preview`.

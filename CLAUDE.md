@@ -562,6 +562,13 @@ separate from `test:bridge` because the two pages share no code. The mesh and
 tract checks read real files from the private Git-LFS `dev-images` package by
 absolute path and print `SKIP` when it is absent.
 
+**`quicklook.html` sets `user-select: none` on purpose.** Without it, a
+rotate-drag becomes a WebKit text selection — NiiVue's `pointerdown` does not
+`preventDefault` — and a selection touching the canvas paints the translucent
+system selection colour over its whole box, turning the entire panel blue until
+the next click. Do not "restore" selectability; the strip's values reach
+VoiceOver through `aria-label` instead.
+
 **`attachToCanvas` replaces the canvas element** — NiiVue `cloneNode(false)`s it
 and calls `replaceChild`, so a reference taken before attaching is detached from
 then on. `quicklook.ts` therefore resolves the canvas by `id` at every use. This

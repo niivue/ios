@@ -15,6 +15,15 @@
         height: 100%;
         background: #000;
         overflow: hidden;
+        /* A rotate-drag on the canvas is an ordinary mouse drag as far as
+           WebKit is concerned — NiiVue's pointerdown handler does not
+           preventDefault (`control/interactions.ts`), so once the drag travels
+           far enough WebKit starts a document selection. A selected <canvas> is
+           painted with the translucent system selection colour over its whole
+           box, so the entire panel — mesh, black background and all — turns
+           blue and stays that way. There is nothing here worth selecting. */
+        -webkit-user-select: none;
+        user-select: none;
         font: 12px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
         color: #f2f2f7;
       }
