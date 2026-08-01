@@ -179,6 +179,67 @@ exit gate in this plan is runnable on this machine. R3 is closed.
   to a file inside the extension's sandbox container (`NSHomeDirectory()/tmp`);
   `os_log` was not readable from the same shell.
 
+## Milestone 1 results — target landed, routing 11/12, `.nii.gz` gate FAILED (2026-08-01)
+
+Delivered: the `QuickLookPreview` target (`com.niivue.mobile.QuickLookPreview`),
+embedded in the Catalyst app, sandboxed, with the network entitlement documented
+as a WebKit requirement rather than a networking one. The preview controller is
+deliberately a stub that reports the routed type and file size — the rendering
+shell is Milestone 2, and keeping them apart means a routing failure here cannot
+be mistaken for a rendering one.
+
+**Builds green on all three destinations** (R5 satisfied): Mac Catalyst, iOS
+Simulator, and generic iOS device. The extension target does not break the iOS
+builds.
+
+### Routing: 11/12 advertised types, 9/9 negative tests
+
+| Fixture | Resolves to | |
+| --- | --- | --- |
+| `.nii` | `gov.nih.nifti-1` (Apple's) | routed |
+| **`.nii.gz`** | **`org.gnu.gnu-zip-archive`** | **NOT ROUTED** |
+| `.mgh` / `.mgz` | `edu.mgh.freesurfer.mgh` / `.mgz` | routed |
+| `.nrrd` | `org.nrrd.nrrd` | routed |
+| `.mha` / `.mhd` | `org.itk.metaimage` / `-header` | routed |
+| `.gii` | `org.nitrc.gifti` | routed |
+| `.mz3` | `com.niivue.mz3` | routed |
+| `.tck` / `.trk` / `.trx` | `org.mrtrix.tck` / `org.trackvis.trk` / `org.trx.trx` | routed |
+
+Negative tests all pass — plain `.gz`, `.zip`, FreeSurfer `.white/.pial/.inflated/.sphere`,
+and `.obj/.stl/.ply` are **not** intercepted.
+
+### The `.nii.gz` failure is a platform limitation, not a bad declaration
+
+`gov.nih.nifti-1-gzip` **is** registered and **does** carry the
+`public.filename-extension` tag `nii.gz` — confirmed via `UTType`. It still never
+matches, because **macOS resolves a file's type from the LAST extension component
+only.** Proof: Apple's own `org.gnu.gnu-zip-tar-archive` declares only `tgz`, and
+a real `.tar.gz` file on this machine resolves to `org.gnu.gnu-zip-archive` too.
+Compound extensions are not a supported concept in the UTI system.
+
+This trips the exit gate the plan already wrote: *"`.nii.gz` compound-extension
+routing works… Failure blocks the release and triggers a narrowly scoped UTI
+redesign."* It has failed, and it cannot be fixed by redesigning our declaration.
+
+**Owner decision required. The options are all imperfect:**
+
+1. **Ship `.nii` only in v1; `.nii.gz` gets no preview.** Honest and safe, but
+   `.nii.gz` is the single most common format in practice, so this guts the
+   feature's value.
+2. **Register for `org.gnu.gnu-zip-archive` and content-sniff.** The extension
+   would become the previewer for *every* `.gz` on the machine, reading the gzip
+   header to decide whether it holds a NIfTI and showing a neutral "Gzip archive,
+   N bytes" fallback otherwise. This is explicitly forbidden by the current
+   product contract. Mitigating context: macOS ships no rich `.gz` preview today,
+   so the practical loss to the user is small — but it does claim another
+   ecosystem's file type, and tarballs would route through us.
+3. **Ask users to decompress.** Not credible.
+
+Recommendation: **option 2, narrowly**, with a hard rule that any gzip whose
+payload is not a NIfTI falls back to plain archive metadata and never renders —
+plus an explicit contract amendment, since it reverses a stated prohibition.
+If that is unacceptable, option 1 and re-scope v1.
+
 ## Risks and open questions
 
 Added after a feasibility review of the plan against the codebase. Everything the

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>NiiVue Preview</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+
+	<!-- The types themselves are declared by the CONTAINING APP's Info.plist;
+	     declarations placed here are ignored by Launch Services. This list only
+	     says which of them we preview.
+
+	     `gov.nih.nifti-1` is Apple's own type from CoreTypes.bundle — listed, not
+	     redeclared. Note what is deliberately ABSENT: `org.gnu.gnu-zip-archive`
+	     and `public.zip-archive`. Claiming either would hijack every .gz and .zip
+	     on the machine, which is the explicit negative test for this milestone. -->
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<key>QLSupportedContentTypes</key>
+			<array>
+				<string>gov.nih.nifti-1</string>
+				<string>gov.nih.nifti-1-gzip</string>
+				<string>edu.mgh.freesurfer.mgh</string>
+				<string>edu.mgh.freesurfer.mgz</string>
+				<string>org.nrrd.nrrd</string>
+				<string>org.itk.metaimage</string>
+				<string>org.itk.metaimage-header</string>
+				<string>org.nitrc.gifti</string>
+				<string>com.niivue.mz3</string>
+				<string>org.mrtrix.tck</string>
+				<string>org.trackvis.trk</string>
+				<string>org.trx.trx</string>
+			</array>
+			<key>QLSupportsSearchableItems</key>
+			<false/>
+		</dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.quicklook.preview</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).PreviewViewController</string>
+	</dict>
+</dict>
+</plist>
