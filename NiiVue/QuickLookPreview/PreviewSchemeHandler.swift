@@ -1,10 +1,16 @@
 //
 //  PreviewSchemeHandler.swift
-//  Serves the extension's bundled web assets over a private scheme.
+//  Serves the extension's bundled web assets and the one previewed document
+//  over a private scheme.
 //
-//  Milestone 2 scope: bundle assets only. The scoped *document* route is
-//  Milestone 3 and is deliberately absent here, so this milestone cannot
-//  accidentally read document bytes.
+//  Milestone 3 adds the document route, factored from the host app's
+//  `BundleSchemeHandler`. Same design, same invariants, same reasons — an opaque
+//  token, path-component containment, bounded chunked reads, and main-queue
+//  confinement of every `WKURLSchemeTask` callback. What is deliberately *not*
+//  shared is the code itself: the extension is a separate binary with a
+//  different lifecycle (one document, no replacement by a picker, teardown on
+//  preview dismissal) and linking the app's file would drag `ContentView.swift`
+//  in with it.
 //
 //  A custom scheme rather than `file://` for the same reason as the host app:
 //  Vite emits `<script type="module" crossorigin>`, and a `file://` page is an
@@ -18,15 +24,24 @@ final class PreviewSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "niivue-preview"
     static let host = "preview"
 
+    /// Bounds the *Swift* allocation per read. It does not bound the peak:
+    /// `WKURLSchemeTask` has no flow control, so the web content process still
+    /// buffers the whole response. The file-size cap in `PreviewViewController`
+    /// is what bounds that, and Milestone 7 sets its real number.
+    private static let chunkSize = 1024 * 1024
+
     private let root: URL
+    private let documentLock = NSLock()
+    private var document: (token: String, url: URL, fileName: String)?
     private let readsLock = NSLock()
     private var reads: [ObjectIdentifier: ReadState] = [:]
 
-    /// Main-queue confined — the same rule the host app learned the hard way.
-    /// `WKURLSchemeTask` raises an uncatchable Objective-C exception if it is
-    /// messaged after WebKit has stopped it, and WebKit marks a task stopped
-    /// *before* calling `stop`, so no background flag check can be atomic
-    /// against it. Sharing the main queue is what makes it safe.
+    /// `cancelled` is **main-queue confined**, and so is every `task.*` call —
+    /// see `deliver(_:_:)`. A lock here would not be enough: WebKit marks a task
+    /// stopped *before* it calls `webView(_:stop:)`, so any "check a flag, then
+    /// send" sequence that spans two queues can still send to a stopped task,
+    /// and `WKURLSchemeTask` answers that with an Objective-C exception Swift
+    /// cannot catch. Sharing one queue with `stop` is what makes it atomic.
     private final class ReadState {
         var cancelled = false
     }
@@ -40,16 +55,64 @@ final class PreviewSchemeHandler: NSObject, WKURLSchemeHandler {
         URL(string: "\(scheme)://\(host)/dist/quicklook.html")!
     }
 
+    // MARK: - Document route
+
+    /// Register the previewed file and return a same-origin URL whose path
+    /// carries only an opaque token and the original filename.
+    ///
+    /// Exactly one document is ever registered per handler, and registering
+    /// again replaces it — a preview that is superseded must not leave the old
+    /// file reachable. The page has no way to enumerate or guess the token, and
+    /// no route exists to any other path outside the bundle root.
+    func registerDocument(_ url: URL, fileName: String) -> URL {
+        let token = UUID().uuidString
+        documentLock.lock()
+        document = (token: token, url: url, fileName: fileName)
+        documentLock.unlock()
+
+        var components = URLComponents()
+        components.scheme = Self.scheme
+        components.host = Self.host
+        // Encode the filename ourselves rather than letting the `path` setter do
+        // it: that setter leaves a literal `%` alone, so a file named `a%2Fb.nii`
+        // would round-trip through `url.path` as `a/b.nii` — four path components
+        // instead of three, and a refused load.
+        let encoded = fileName.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        components.percentEncodedPath = "/document/\(token)/\(encoded)"
+        return components.url!
+    }
+
+    /// Drop the document route. Called on teardown so a torn-down preview's file
+    /// is unreachable even if a stale page were somehow still running.
+    func invalidateDocument() {
+        documentLock.lock()
+        document = nil
+        documentLock.unlock()
+    }
+
+    // MARK: - Serving
+
     private static let mimeTypes = [
-        "html": "text/html", "js": "text/javascript", "css": "text/css",
-        "json": "application/json", "svg": "image/svg+xml", "png": "image/png",
-        "woff2": "font/woff2", "wasm": "application/wasm",
+        "html": "text/html", "js": "text/javascript", "mjs": "text/javascript",
+        "css": "text/css", "json": "application/json", "svg": "image/svg+xml",
+        "png": "image/png", "woff2": "font/woff2", "wasm": "application/wasm",
+        "gz": "application/gzip", "map": "application/json",
     ]
 
     /// Containment is checked on **path components**, never `hasPrefix`:
     /// `/root` is a string prefix of `/rootlike/secret`.
     private func fileURL(for url: URL) -> URL? {
-        let relative = url.path.split(separator: "/").joined(separator: "/")
+        let parts = url.path.split(separator: "/").map(String.init)
+        if parts.first == "document" {
+            guard parts.count == 3 else { return nil }
+            documentLock.lock()
+            let registered = document
+            documentLock.unlock()
+            guard registered?.token == parts[1], registered?.fileName == parts[2] else { return nil }
+            return registered?.url
+        }
+
+        let relative = parts.joined(separator: "/")
         let candidate = root.appendingPathComponent(relative)
             .standardizedFileURL
             .resolvingSymlinksInPath()
@@ -66,25 +129,95 @@ final class PreviewSchemeHandler: NSObject, WKURLSchemeHandler {
     /// will not start without it. This CSP is what makes "offline" true in
     /// practice rather than merely intended: no origin but our own is reachable,
     /// so the capability is never exercisable by page script.
-    private func response(for requestURL: URL, mime: String, length: Int) -> URLResponse? {
-        HTTPURLResponse(
-            url: requestURL,
-            statusCode: 200,
-            httpVersion: "HTTP/1.1",
-            headerFields: [
-                "Content-Type": mime,
-                "Content-Length": String(length),
-                "Content-Security-Policy":
-                    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-                    + "connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; "
-                    + "worker-src 'self' blob:; object-src 'none'; base-uri 'none'; "
-                    + "frame-ancestors 'none'",
-                "X-Content-Type-Options": "nosniff",
-            ])
+    ///
+    /// Nil rather than a header-less `URLResponse` when the response cannot be
+    /// built. Failing closed matters — the fallback that would serve the page
+    /// with no CSP and no `nosniff` is worse than not serving it. A plain
+    /// `URLResponse` also makes `fetch()` report status 0, which NiiVue reads as
+    /// a failed load.
+    private func response(for requestURL: URL, fileURL: URL, mime: String) -> URLResponse? {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let length = (attributes?[.size] as? NSNumber)?.int64Value ?? -1
+        var headers = [
+            "Content-Type": mime,
+            "Content-Security-Policy":
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                + "connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; "
+                + "worker-src 'self' blob:; object-src 'none'; base-uri 'none'; "
+                + "frame-ancestors 'none'",
+            "X-Content-Type-Options": "nosniff",
+        ]
+        if length >= 0 {
+            headers["Content-Length"] = String(length)
+        }
+        return HTTPURLResponse(url: requestURL,
+                               statusCode: 200,
+                               httpVersion: "HTTP/1.1",
+                               headerFields: headers)
+    }
+
+    private func finishRead(_ id: ObjectIdentifier) {
+        readsLock.lock()
+        reads.removeValue(forKey: id)
+        readsLock.unlock()
+    }
+
+    /// Run `body` on the main queue unless the task has been stopped, reporting
+    /// whether it ran. `webView(_:stop:)` is delivered on the main queue too, so
+    /// the cancellation check and the `task.*` call cannot be split by a stop.
+    ///
+    /// Deliberately `sync`, not `async`: it makes the read loop wait for each
+    /// chunk to be handed over, so a large file cannot pile up as hundreds of
+    /// pending main-queue blocks each holding a megabyte. Nothing on the main
+    /// queue ever waits on this handler, so there is no inversion.
+    @discardableResult
+    private func deliver(_ state: ReadState, _ body: () -> Void) -> Bool {
+        var ran = false
+        DispatchQueue.main.sync {
+            guard !state.cancelled else { return }
+            body()
+            ran = true
+        }
+        return ran
+    }
+
+    private func serve(_ task: WKURLSchemeTask,
+                       requestURL: URL,
+                       fileURL: URL,
+                       mime: String,
+                       state: ReadState,
+                       id: ObjectIdentifier) {
+        defer { finishRead(id) }
+        do {
+            let handle = try FileHandle(forReadingFrom: fileURL)
+            // Closed as soon as delivery finishes, including on cancellation:
+            // Apple advises against holding a descriptor open for the lifetime
+            // of a preview, and a stopped task returns out of this scope.
+            defer { try? handle.close() }
+            guard let response = response(for: requestURL, fileURL: fileURL, mime: mime) else {
+                deliver(state) { task.didFailWithError(URLError(.cannotParseResponse)) }
+                return
+            }
+            guard deliver(state, { task.didReceive(response) }) else { return }
+
+            while true {
+                guard let chunk = try handle.read(upToCount: Self.chunkSize), !chunk.isEmpty else {
+                    break
+                }
+                guard deliver(state, { task.didReceive(chunk) }) else { return }
+            }
+            deliver(state) { task.didFinish() }
+        } catch {
+            deliver(state) { task.didFailWithError(error) }
+        }
     }
 
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
-        guard let url = task.request.url, url.host == Self.host else {
+        guard let url = task.request.url else {
+            task.didFailWithError(URLError(.badURL))
+            return
+        }
+        guard url.host == Self.host else {
             task.didFailWithError(URLError(.unsupportedURL))
             return
         }
@@ -99,30 +232,15 @@ final class PreviewSchemeHandler: NSObject, WKURLSchemeHandler {
         reads[id] = state
         readsLock.unlock()
 
-        // Bundle assets are small and finite; read them off the main thread but
-        // deliver on it.
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            defer {
-                self.readsLock.lock()
-                self.reads.removeValue(forKey: id)
-                self.readsLock.unlock()
-            }
-            let data = try? Data(contentsOf: file)
-            DispatchQueue.main.async {
-                guard !state.cancelled else { return }
-                guard let data, let response = self.response(for: url, mime: mime, length: data.count) else {
-                    task.didFailWithError(URLError(.cannotParseResponse))
-                    return
-                }
-                task.didReceive(response)
-                task.didReceive(data)
-                task.didFinish()
-            }
+        // The closure holds `task` strongly until `finishRead` runs, so the
+        // `ObjectIdentifier` key cannot be recycled by a later task while this
+        // read is in flight.
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            serve(task, requestURL: url, fileURL: file, mime: mime, state: state, id: id)
         }
     }
 
-    /// Delivered on the main queue, which is what makes the confinement work.
+    /// Delivered on the main queue, which is what makes `deliver(_:_:)` safe.
     func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {
         let id = ObjectIdentifier(task as AnyObject)
         readsLock.lock()

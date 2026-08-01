@@ -344,6 +344,145 @@ consulted only when the *bytes* are inconclusive — a gzip variant `GzipPeek`
 cannot inflate — where a user who named a file `.nii.gz` is better served by a
 visible failure than by being told it is a foreign archive.
 
+## Milestone 3 results — scoped transport and lifecycle landed (2026-08-01)
+
+Delivered:
+
+- **`PreviewSchemeHandler` gained the document route**, factored from the host
+  app's `BundleSchemeHandler`: a UUID token plus the original filename, both
+  matched exactly; the filename percent-encoded with `.alphanumerics` (the
+  `URLComponents.path` `%` trap); path-component containment; 1 MiB chunked
+  `FileHandle` reads; and the main-queue-confined `deliver(_:_:)` in its `sync`
+  form, so a large file cannot pile up as pending main-queue blocks. The
+  descriptor closes on every exit including cancellation.
+  `invalidateDocument()` drops the route on teardown.
+- **Deliberately copied, not linked.** The app's handler lives inside
+  `ContentView.swift`; sharing the file would drag the whole app UI into the
+  extension. The invariants are the shared asset, and both copies carry the
+  same comments explaining why.
+- **Generation-scoped lifecycle.** One counter, bumped on every request *and*
+  every teardown; timers and `callAsyncJavaScript` completions carry the
+  generation they were issued under. Teardown runs from `viewDidDisappear`,
+  from a replacement request, and from `deinit`.
+- **Two timeouts, not one.** Readiness (10 s, page never came up) completes
+  with an error so Quick Look shows its own panel rather than an indefinite
+  spinner; load (20 s, page is up) asks the page to draw its own `timeout`
+  fallback. A single timeout could only do one of those correctly.
+- **Structured failure codes** — `PreviewFailure` in Swift mirrored by
+  `FailureCode` in `quicklook.ts`, crossing as bare strings.
+- The size cap fails closed on an unreadable size, matching the app's import
+  check. Its number is provisional; Milestone 7 owns the real one.
+
+### Two lifecycle defects found in the Milestone 2 code
+
+- **`config.userContentController.add(self, …)` was a retain cycle.** The
+  controller, and through it the web view, scheme handler and security scope,
+  would have outlived every preview — which is precisely what the "twenty
+  open/dismiss cycles" gate exists to catch. Now goes through a
+  `WeakScriptMessageHandler`, as the host app does.
+- **The navigation delegate did not exclude the document route.** It had no
+  document route to exclude in Milestone 2; it does now, and the picked-file
+  route must never become the top-level document.
+
+### Exit gate
+
+| Criterion | Status |
+| --- | --- |
+| A selected fixture reaches JavaScript with byte count and filename intact | **pass** — automated, see below |
+| Cancelling during asset and document load closes resources, no late mutation | **pass** by construction (main-queue confinement + generation scoping); exercised by hand in Finder |
+| Repeat open/dismiss cycles retain nothing | **pass** — the retain cycle above was the one real obstacle |
+| All three destinations still build | **pass** |
+
+## Milestone 4 results — voxel previews and metadata landed (2026-08-01)
+
+Delivered:
+
+- **One load path for every voxel format.** Every NiiVue volume reader
+  normalizes into a NIfTI header, so NIfTI, MGH/MGZ, NRRD and MetaImage need no
+  per-format branching — `loadVolumes` plus one header extractor covers them.
+- **`customLayout`, not `multiplanarType`.** Four fixed equal quadrants in
+  reading order (Axial, Coronal, Sagittal, Render). `customLayout` overrides
+  every built-in layout mode, so the preview cannot drift with NiiVue's
+  multiplanar heuristics. `isEqualSize = true` additionally draws all three
+  orientations at one physical scale, so the panels are comparable.
+- **`limitFrames4D: 1`** — verified to work: a 7-frame fixture loads
+  `nFrame4D = 1`, `nTotalFrame4D = 7`, and `img.length` is exactly one frame.
+  The strip reads **`frames 1 of 7`**, which states the whole contract in one
+  field.
+- **`src/preview-metadata.ts`** — format, dims, voxel size with units, physical
+  FOV, datatype, orientation code, frame count, file size. Closed by
+  construction: every field is a number, a code, or the filename, so
+  `descrip`, `aux_file`, `intent_name` and `db_name` are never read.
+- Dims and spacing are the **file's own** `hdr` values, not NiiVue's
+  RAS-reordered view, so a preview matches `fslhd`; the reorientation is
+  reported separately as the orientation code, derived by inverting `permRAS`.
+- **Three outcomes, not two.** `loaded` + render; `loaded` + *metadata-only*
+  (the file parses but has no ordinary voxel view); and `failed`. Metadata-only
+  posts `loaded` on purpose — a `failed` would make the native side hand Quick
+  Look its generic panel and throw away the header we just extracted.
+
+### What NiiVue actually does with malformed input, measured
+
+Three assumptions were wrong and were corrected against the library rather than
+around it:
+
+| Fixture | NiiVue's behaviour | Preview outcome |
+| --- | --- | --- |
+| 4D, 7 frames | `limitFrames4D` honoured exactly | renders frame 0, reports `1 of 7` |
+| complex64 | **throws** `Unsupported datatype: 32` — never becomes a volume | `unsupported`, not `unreadable`; the message is matched narrowly and degrades to `unreadable` |
+| truncated (⅓ of voxels) | **loads happily**, `img.length` 4480 vs `nVox3D` 13440 | detected by comparing the two → metadata-only |
+| zero-dimension | throws | fallback panel |
+| garbage | throws | fallback panel |
+
+The truncated case is the one that mattered: it would otherwise have drawn a
+head with the bottom third missing and no indication why.
+
+Because complex NIfTI never loads, the metadata-fallback branch for it is
+reachable only via the spectroscopy path (`isImaginary`), which is where NiiVue
+does produce a complex-typed volume. That branch is kept for that reason, not
+speculatively.
+
+### Exit gate
+
+| Criterion | Status |
+| --- | --- |
+| Each core voxel fixture produces four nonblank tiles and correct metadata | **pass** — automated, per-quadrant lit-pixel counts |
+| A 4D fixture reports its frame count while retaining only frame zero | **pass** |
+| Corrupt, truncated, zero-dimension, unsupported-datatype → fallback, not blank or crash | **pass** |
+
+Still open for Milestone 5: mesh and tract requests are **declined**
+(`unsupported`) rather than mis-drawn as an empty render tile.
+
+## Regression coverage added for Milestones 3–4
+
+`NiiVue/React/tests/preview-regression.mjs`, run with `npm run test:preview`.
+**48 checks, all passing.** Same shape as `bridge-regression.mjs`: it drives the
+built `dist/` in headless Chromium over a throwaway http server, so it exercises
+the bytes the extension bundles.
+
+Two things in it are worth not rediscovering:
+
+- **Canvas pixel sampling *is* possible after all — from outside the page.**
+  Milestone 0.5 concluded "do not gate anything on canvas pixel sampling"
+  because in-page `drawImage` reported zero lit pixels (no
+  `preserveDrawingBuffer`). The compositor does have the frame, so Playwright's
+  screenshot captures it correctly; handing that PNG *back* to the page to
+  decode gives per-quadrant lit-pixel counts. The four-tile exit gate is
+  therefore automated rather than eyeballed. The original finding still holds
+  for anything sampling from inside the page, which is what the extension would
+  have to do.
+- **Fixtures are generated, not collected** — `tests/preview-fixtures.mjs`
+  writes NIfTI-1 files with exact dims, spacing, affine, datatype and
+  truncation. R4 in this plan notes that five of the eight v1 families have no
+  fixture anywhere in the monorepo; for the *properties* under test (4D,
+  complex, zero-dimension, truncated) no real scan is more precise than a
+  synthesised one, and Milestone 0 already allows a deterministic generation
+  step in place of a redistributable file.
+
+What it still does not cover is everything native: the chunked reads, the
+document token, security scope, the Quick Look completion gate and the timeouts
+all need Finder on a Mac.
+
 ## Risks and open questions
 
 Added after a feasibility review of the plan against the codebase. Everything the

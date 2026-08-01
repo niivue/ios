@@ -542,9 +542,15 @@ address reuse. The dispatched closure holds the task strongly until after
 
 ## Quick Look preview extension (in progress)
 
-`quicklook_plan.md` is the plan and the record. Status: **Milestone 0.5 feasibility
-gate PASSED** (2026-08-01); Milestone 1 is next. The extension does **not** ship
-yet — `README.md` describes it, so treat that as planned, not delivered.
+`quicklook_plan.md` is the plan and the record. Status: **Milestones 0.5–4
+landed** (2026-08-01); Milestone 5 (mesh and streamline previews) is next. The
+extension does **not** ship yet — `README.md` describes it, so treat that as
+planned, not delivered.
+
+Web-side checks for the preview live in
+`NiiVue/React/tests/preview-regression.mjs` (`npm run test:preview`, 48 checks)
+with generated NIfTI fixtures in `tests/preview-fixtures.mjs`. They are separate
+from `test:bridge` because the two pages share no code.
 
 Facts from the spike that are expensive to rediscover:
 

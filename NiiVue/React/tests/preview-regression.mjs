@@ -1,0 +1,283 @@
+/**
+ * Headless regression checks for the Quick Look preview page.
+ *
+ *   node tests/preview-regression.mjs       # after `npm run build`
+ *
+ * Covers the web half of Milestones 3 and 4: a document reaches JavaScript and
+ * decodes with its header intact, the fixed 2×2 layout draws four non-blank
+ * tiles, 4D files keep frame zero while reporting the total, exactly one
+ * terminal message is ever posted, and no failure path leaves a blank canvas.
+ *
+ * What it cannot cover is the native half — `PreviewSchemeHandler`'s chunked
+ * reads, the opaque document token, security scope, and the Quick Look
+ * completion gate all need Finder on a Mac. An http server standing in for the
+ * scheme handler proves the page's side of the contract, not the transport's.
+ *
+ * Playwright is deliberately NOT a dependency in package.json; see the note in
+ * bridge-regression.mjs.
+ */
+import { createServer } from 'node:http'
+import { readFile, stat } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { join, extname, normalize, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { nifti1 } from './preview-fixtures.mjs'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const DIST = join(HERE, '..', 'dist')
+const SAMPLES = join(HERE, '..', '..', 'NiiVue', 'samples')
+const DEMO = 'T1w_DEMO.nii.gz'
+
+async function loadPlaywright() {
+  try {
+    return await import('playwright')
+  } catch {
+    const root = execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim()
+    return await import(`file://${join(root, 'playwright', 'index.mjs')}`)
+  }
+}
+
+/** Synthetic fixtures, served under /fixtures/. See preview-fixtures.mjs. */
+const FIXTURES = {
+  'basic.nii': nifti1({ dims: [24, 28, 20], pixDims: [2, 2, 2.5] }),
+  'series.nii': nifti1({ dims: [12, 12, 10, 7] }),
+  'complex.nii': nifti1({ dims: [12, 12, 10], datatype: 32 }),
+  'flat.nii': nifti1({ dims: [16, 16, 1] }),
+  'empty.nii': nifti1({ dims: [0, 0, 0] }),
+  // Header promises a full volume; the data stops a third of the way in.
+  'truncated.nii': nifti1({ dims: [24, 28, 20], truncateTo: 352 + 24 * 28 * 20 / 3 }),
+  'garbage.nii': Buffer.from('not a volume in any format niivue reads '.repeat(64)),
+}
+
+const MIME = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+}
+
+const server = createServer(async (req, res) => {
+  const path = normalize(decodeURIComponent(req.url.split('?')[0]))
+  try {
+    let body
+    if (path.startsWith('/fixtures/')) {
+      body = FIXTURES[path.slice('/fixtures/'.length)]
+      if (!body) throw new Error('no such fixture')
+    } else if (path.startsWith('/samples/')) {
+      body = await readFile(join(SAMPLES, path.slice('/samples/'.length)))
+    } else {
+      body = await readFile(join(DIST, path === '/' ? 'quicklook.html' : path))
+    }
+    res.writeHead(200, { 'Content-Type': MIME[extname(path)] ?? 'application/octet-stream' })
+    res.end(body)
+  } catch {
+    res.writeHead(404).end('not found')
+  }
+})
+await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+const base = `http://127.0.0.1:${server.address().port}`
+
+const results = []
+function check(name, ok, detail) {
+  results.push(ok)
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`)
+}
+
+const { chromium } = await loadPlaywright()
+const browser = await chromium.launch({
+  args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+})
+
+/**
+ * A fresh page with the host's message handler stubbed in before any module
+ * runs, so the `ready` message is captured too.
+ */
+async function openPreview() {
+  const page = await browser.newPage({ viewport: { width: 700, height: 560 } })
+  page.on('pageerror', (e) => console.log('  [page exception]', e.message))
+  await page.addInitScript(() => {
+    window.__posted = []
+    window.webkit = {
+      messageHandlers: { qlPreview: { postMessage: (m) => window.__posted.push(JSON.parse(m)) } },
+    }
+  })
+  await page.goto(`${base}/quicklook.html`)
+  await page.waitForFunction(() => !!window.niivuePreview, null, { timeout: 30000 })
+  await page.waitForFunction(() => window.__posted.some((m) => m.stage === 'ready'), null, {
+    timeout: 30000,
+  })
+  return page
+}
+
+/** Run one request to completion and return its terminal message. */
+async function preview(url, displayName, extra = {}) {
+  const page = await openPreview()
+  await page.evaluate(
+    ([u, name, rest]) =>
+      window.niivuePreview.render({ url: u, displayName: name, family: 'volume', ...rest }),
+    [url, displayName, extra],
+  )
+  const messages = await page.evaluate(() => window.__posted)
+  return { page, message: messages.find((m) => m.stage === 'loaded' || m.stage === 'failed') }
+}
+
+/**
+ * Lit-pixel count per quadrant of the canvas.
+ *
+ * The canvas has no `preserveDrawingBuffer`, so reading it back in-page returns
+ * an empty buffer — the Milestone 0.5 spike lost a day to exactly that. The
+ * compositor does have the frame, so the screenshot is taken by Playwright and
+ * handed back to the page only to be decoded.
+ */
+async function quadrantPixels(page) {
+  const shot = (await page.locator('#gl').screenshot({ type: 'png' })).toString('base64')
+  return page.evaluate(async (b64) => {
+    const blob = await (await fetch(`data:image/png;base64,${b64}`)).blob()
+    const bitmap = await createImageBitmap(blob)
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(bitmap, 0, 0)
+    const hw = Math.floor(bitmap.width / 2)
+    const hh = Math.floor(bitmap.height / 2)
+    return [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ].map(([qx, qy]) => {
+      const { data } = ctx.getImageData(qx * hw, qy * hh, hw, hh)
+      let lit = 0
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] + data[i + 1] + data[i + 2] > 60) lit++
+      }
+      return lit
+    })
+  }, shot)
+}
+
+// --- 1. Surface --------------------------------------------------------------
+let page = await openPreview()
+const surface = await page.evaluate(() => Object.keys(window.niivuePreview).sort())
+check('page exposes render and fail', surface.join(',') === 'fail,render', surface.join(','))
+await page.close()
+
+// --- 2. A real volume decodes, draws, and reports its header ----------------
+const demoSize = (await stat(join(SAMPLES, DEMO))).size
+let result = await preview(`${base}/samples/${DEMO}`, DEMO, { fileSize: demoSize })
+let meta = result.message?.metadata ?? {}
+check('demo volume posts `loaded`', result.message?.stage === 'loaded', result.message?.stage)
+check('it is displayable', meta.displayable === 'true', meta.displayable)
+check('format is named', meta.format === 'NIfTI', meta.format)
+check('dimensions are reported', meta.dims === '188×256×190', meta.dims)
+check('voxel spacing carries a unit', /^[\d.]+×[\d.]+×[\d.]+ mm$/.test(meta.voxel ?? ''), meta.voxel)
+check('field of view is derived', /^[\d.]+×[\d.]+×[\d.]+ mm$/.test(meta.fov ?? ''), meta.fov)
+check('datatype is named, not numbered', /^[a-z]/.test(meta.type ?? ''), meta.type)
+check('orientation is a 3-letter code', /^[RLAPSI]{3}$/.test(meta.orient ?? ''), meta.orient)
+check('a 3D volume reports no frame count', meta.frames === undefined, meta.frames)
+check('file size is shown', meta.size === '4.0 MB', meta.size)
+
+const strip = await result.page.locator('#meta').innerText()
+check('the strip shows the filename', strip.includes(DEMO), strip.replace(/\n/g, ' | '))
+check('the spinner is dismissed', await result.page.locator('#loading').isHidden())
+check('no fallback panel over a good render', await result.page.locator('#fallback').isHidden())
+
+// The exit gate: four non-blank tiles.
+const quads = await quadrantPixels(result.page)
+check(
+  'all four quadrants are non-blank',
+  quads.every((n) => n > 500),
+  quads.join(' / '),
+)
+
+// A late timeout from the host must not overpaint a finished preview.
+await result.page.evaluate(() => window.niivuePreview.fail('timeout'))
+const terminal = (await result.page.evaluate(() => window.__posted)).filter(
+  (m) => m.stage === 'loaded' || m.stage === 'failed',
+)
+check('a late fail() cannot post a second terminal message', terminal.length === 1, `${terminal.length}`)
+check('the fallback does not overpaint a loaded preview', await result.page.locator('#fallback').isHidden())
+await result.page.close()
+
+// --- 3. Synthetic geometry, so the numbers are known exactly ----------------
+result = await preview(`${base}/fixtures/basic.nii`, 'basic.nii', { fileSize: 1234 })
+meta = result.message?.metadata ?? {}
+check('synthetic dims are exact', meta.dims === '24×28×20', meta.dims)
+check('synthetic spacing is exact', meta.voxel === '2×2×2.5 mm', meta.voxel)
+check('synthetic fov is exact', meta.fov === '48×56×50 mm', meta.fov)
+check('synthetic orientation is RAS', meta.orient === 'RAS', meta.orient)
+check('synthetic datatype is uint8', meta.type === 'uint8', meta.type)
+await result.page.close()
+
+// --- 4. 4D keeps frame zero and reports the total ---------------------------
+result = await preview(`${base}/fixtures/series.nii`, 'series.nii')
+meta = result.message?.metadata ?? {}
+check('a 4D file loads', result.message?.stage === 'loaded', result.message?.stage)
+check('it reports one frame of seven', meta.frames === '1 of 7', meta.frames)
+check('and still renders', meta.displayable === 'true', meta.displayable)
+await result.page.close()
+
+// --- 5. Loadable but not an ordinary voxel view → metadata, not an error ----
+// `flat.nii` has no third dimension and `truncated.nii` is short of voxel data;
+// both parse, so their headers are worth showing rather than discarding behind
+// an error.
+for (const file of ['flat.nii', 'truncated.nii']) {
+  result = await preview(`${base}/fixtures/${file}`, file)
+  meta = result.message?.metadata ?? {}
+  const shown = await result.page.locator('#meta').innerText()
+  check(`${file} is not an error`, result.message?.stage === 'loaded', result.message?.stage)
+  check(`${file} falls back to metadata`, meta.displayable === 'false', meta.displayable)
+  check(`${file} still shows its header`, shown.includes(file) && shown.includes('dims'), shown.replace(/\n/g, ' | '))
+  check(`${file} says why there is no image`, (await result.page.locator('#fallback-detail').innerText()).length > 0)
+  await result.page.close()
+}
+
+// A datatype NiiVue refuses outright never becomes a volume, so it cannot reach
+// the metadata path — but it must not be reported as a damaged file either.
+result = await preview(`${base}/fixtures/complex.nii`, 'complex.nii')
+check('complex data is unsupported, not unreadable', result.message?.code === 'unsupported', result.message?.code)
+check('complex data still shows a panel', await result.page.locator('#fallback').isVisible())
+await result.page.close()
+
+// --- 6. Malformed input fails visibly, and never blankly -------------------
+for (const file of ['empty.nii', 'garbage.nii']) {
+  result = await preview(`${base}/fixtures/${file}`, file)
+  const panelShown =
+    (await result.page.locator('#fallback').isVisible()) ||
+    (await result.page.locator('#meta').isVisible())
+  check(`${file} posts a terminal message`, !!result.message, result.message?.code ?? result.message?.stage)
+  check(`${file} shows something, never a blank canvas`, panelShown)
+  check(`${file} does not claim to be displayable`, result.message?.metadata?.displayable !== 'true')
+  await result.page.close()
+}
+
+// --- 7. Native-detected failures render a panel ----------------------------
+for (const [code, expect] of [
+  ['resource-limit', 'too large'],
+  ['unreadable', 'could not be read'],
+]) {
+  page = await openPreview()
+  await page.evaluate((c) => window.niivuePreview.fail(c), code)
+  const reported = (await page.evaluate(() => window.__posted)).find((m) => m.stage === 'failed')
+  const detail = await page.locator('#fallback-detail').innerText()
+  check(`fail('${code}') posts its code`, reported?.code === code, reported?.code)
+  check(`fail('${code}') explains itself on screen`, detail.includes(expect), detail)
+  await page.close()
+}
+
+// --- 8. An unreachable document is reported, not swallowed -----------------
+result = await preview(`${base}/fixtures/does-not-exist.nii`, 'gone.nii')
+check('an unreadable document posts `unreadable`', result.message?.code === 'unreadable', result.message?.code)
+check('the fallback panel is visible', await result.page.locator('#fallback').isVisible())
+await result.page.close()
+
+// --- 9. Meshes are declined until Milestone 5 ------------------------------
+result = await preview(`${base}/fixtures/basic.nii`, 'surface.mz3', { family: 'mesh' })
+check('a mesh request is declined, not mis-drawn', result.message?.code === 'unsupported', result.message?.code)
+await result.page.close()
+
+await browser.close()
+server.close()
+
+const failed = results.filter((ok) => !ok).length
+console.log(`\n${results.length - failed}/${results.length} checks passed`)
+process.exit(failed ? 1 : 0)
