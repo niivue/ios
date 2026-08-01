@@ -10,8 +10,8 @@ handler.
   Files integration out of v1.
 - Add a view-controller-based Quick Look Preview Extension using
   `UIViewController` and `QLPreviewingController`.
-- Host a minimal offline NiiVue page in `WKWebView`. Do not use the app's
-  base64 file bridge.
+- Host a minimal offline NiiVue page in `WKWebView`. Reuse the host app's scoped
+  scheme transport; do not revive a base64 file bridge.
 - Permit viewing interactions only: resize, orbit, zoom, slice scrolling, and
   crosshair movement. Exclude drawing, saving, settings, menus, and links.
 - Show voxel data as equal-size Axial, Coronal, Sagittal, and Render quadrants.
@@ -24,7 +24,14 @@ handler.
 - Show meshes and streamlines in a fitted 3D render view.
 - Use concise in-preview fallbacks for malformed, inaccessible, unsupported,
   oversized, or graphics-incompatible files. Never leave a blank canvas.
-- Remain fully offline. Do not add a network entitlement to the extension.
+- Remain fully offline — **by construction, not by entitlement**. The extension
+  *must* carry `com.apple.security.network.client`: without it WebKit refuses to
+  start its auxiliary processes and the preview is a black rectangle (proved in
+  Milestone 0.5, owner-approved 2026-08-01). Offline is then enforced by bundled
+  assets only, a self-only CSP, a navigation delegate restricted to the app
+  scheme and host, and no remote URLs in any runtime bundle. The entitlement
+  grants a capability the extension never exercises; Milestone 8 must verify no
+  network access actually occurs.
 - Register only the file types required by the extension. Do not add the main
   app to Finder's **Open With** list.
 - Preserve the existing iOS/Catalyst 16.4 deployment floor and build for both
@@ -34,7 +41,8 @@ handler.
 ## Transport decision
 
 Build the scoped file transport in the host app before the Quick Look extension.
-The app's base64 import path is a known memory and latency problem; making Quick
+The app's original base64 import path was a memory and latency problem; commit
+`32569d3` replaced it with `BundleSchemeHandler`. Making Quick
 Look the first consumer would leave that blocker in the shipped app while a new
 feature is being developed. The host now owns the first implementation: an opaque
 same-origin route, security-scoped access, bounded native reads, cancellation, and
@@ -51,13 +59,133 @@ Apple references:
 - [Preparing a file preview](https://developer.apple.com/documentation/quicklookui/qlpreviewingcontroller/preparepreviewoffile%28at%3Acompletionhandler%3A%29)
 - [Data-based previews](https://developer.apple.com/documentation/quicklookui/qlpreviewprovider)
 
+## Milestone 0.5 results — RUN, and the gate is PASSED (2026-08-01)
+
+The spike was built in a throwaway git worktree so it never touched the repo, and
+was driven by Finder/`qlmanage` against an ad-hoc-signed Catalyst build. Its code
+is gone; these findings are the deliverable.
+
+**Decision: proceed to Milestone 1** — with one product-contract conflict that
+needs an owner ruling first (see N1).
+
+### R1 — Can NiiVue render inside the extension? **YES.**
+
+Measured from inside the extension process, previewing a 9.1 MB uncompressed
+NIfTI (188×256×190):
+
+| Probe | Result |
+| --- | --- |
+| WebGL2 context | **available** |
+| Renderer / vendor | **`Apple GPU` / `Apple Inc.`** — real hardware, not software |
+| `MAX_TEXTURE_SIZE` / `MAX_3D_TEXTURE_SIZE` | 16384 / **2048** |
+| `navigator.gpu` (WebGPU) | absent — same as the host app, so `backend: 'webgpu'` downgrades up front |
+| `attachToCanvas` | **37 ms** |
+| `loadVolumes` → drawn | **257 ms** |
+| Total, `preparePreviewOfFile` → `loaded` | **294 ms** (target is ≤2 s) |
+| Rendered output | **visually confirmed by the owner** in the Finder preview panel |
+
+Both DOM *and* the WebGL canvas composite into the Quick Look preview.
+
+### N1 — NEW BLOCKER: WKWebView requires the network entitlement (contract conflict)
+
+Without `com.apple.security.network.client` the **WebKit content process dies
+instantly** — twice, before any navigation commits — and the preview is a black
+rectangle. Adding it makes everything above work. Nothing else changed.
+
+This directly contradicts the product contract line *"Remain fully offline. Do not
+add a network entitlement to the extension."* It is not optional: WebKit will not
+start its auxiliary processes in a sandboxed host without it, even for a purely
+local bundled page.
+
+**Owner decision required.** The recommendation is to take the entitlement and
+keep the extension offline *by construction* instead of by entitlement — bundled
+assets only, a self-only CSP, a navigation delegate that allows only the app
+scheme/host, and no remote URLs in any runtime bundle. The entitlement grants a
+capability the extension then never exercises. If that is unacceptable, the
+feature needs a non-WebKit rendering path and the plan changes fundamentally.
+
+### R2 — Memory: proceed, but Milestone 7 budgets become entry criteria
+
+| Process | Resident, volume loaded |
+| --- | --- |
+| Extension process itself | **~16 MB** |
+| WebKit `WebContent` | ~123–149 MB |
+| WebKit `GPU` | ~169–226 MB |
+
+The extension process is almost free; essentially all of the cost is in the shared
+WebKit processes, and those are shared with the Catalyst app rather than charged
+to the extension's own jetsam limit. Nothing was killed at these sizes and the
+preview completed comfortably. R2's worry — that NiiVue's *baseline* footprint
+alone would exceed the extension budget — did not materialise on macOS. Treat the
+Milestone 7 budgets as entry criteria anyway; this was one small file.
+
+### R3 — Signing and discovery: **ad-hoc is sufficient. No dev certificate needed.**
+
+`CODE_SIGN_IDENTITY="-"` + `lsregister -f -R` + `pluginkit -a` was enough for
+Quick Look to invoke the extension. `preparePreviewOfFile` fired, and the
+previewed file arrived **readable with the correct byte count** — so the sandbox
+grants document read access without any broad entitlement. Every Finder-facing
+exit gate in this plan is runnable on this machine. R3 is closed.
+
+### Other findings that change later milestones
+
+- **UTI declarations must live in the CONTAINING APP's `Info.plist`, not the
+  extension's.** Verified both ways: declared only in the appex, the test file
+  resolved to a `dyn.*` type and never matched; moved into the app's `Info.plist`,
+  it resolved immediately. This affects every UTI in Milestone 1.
+- **UTI landscape, measured (this supersedes an earlier wrong note in this file
+  that said `gov.nih.nifti-1` was not an Apple type — that check grepped a binary
+  plist and missed it).** Apple's `/System/Library/CoreServices/CoreTypes.bundle`
+  **does** declare `gov.nih.nifti-1` (description "NIfTI-1", reference URL
+  `nifti.nimh.nih.gov`, OSType `NII1`, extension `nii`). Verified resolution on
+  this machine with the competing NIfTIViewQL registration removed:
+
+  | File | Resolves to | Consequence for Milestone 1 |
+  | --- | --- | --- |
+  | `.nii` | `gov.nih.nifti-1` (**Apple system UTI**) | **Reuse it.** Do not namespace our own — decided by the owner. |
+  | `.nii.gz` | `org.gnu.gnu-zip-archive` (**generic gzip**) | We must export our own compound type. This is the release gate the plan already flags. |
+
+  Apple's only other relevant declarations are `ca.mcgill.mni.bic.mnc` (minc) and
+  `org.nema.dicom`. There is **no** system type for mgh/mgz, nrrd, mha/mhd, gii,
+  mz3, tck/trk/trx — all of those need exported declarations.
+
+  `gov.nih.nifti-1-gzip` existed on this machine only because NIfTIViewQL declared
+  it; it disappeared when that registration was removed. That name is therefore
+  free to re-declare, and matching it keeps us consistent with the de-facto
+  convention rather than inventing a third identity for `.nii.gz`. It must conform
+  to `org.gnu.gnu-zip-archive`, and the extension must **never** register for
+  `org.gnu.gnu-zip-archive`/`public.gzip` itself.
+
+  Competitor status on this machine: NIfTIViewQL is **removed** — it was never
+  installed to `/Applications` or `~/Library/QuickLook`; its only registration came
+  from a build product inside its own source checkout, which has been deleted.
+  The source checkout at `/Users/chris/src/NIfTIViewQL` remains and would
+  re-register if rebuilt.
+- **The scheme handler must return `HTTPURLResponse`, not `URLResponse`.** With a
+  plain `URLResponse`, `fetch()` reports status 0 / `ok: false` and NiiVue fails
+  the load with "fetchVolume failed". The host app already does this correctly;
+  Milestone 3 must not regress it when the transport is factored out.
+- **The Vite multi-page build works.** Two entries produced a shared
+  `niivue-*.js` chunk (1.32 MB) plus a 1.7 kB Quick Look entry — confirming the
+  "Build organization" assumption that NiiVue can be shared between the app and
+  the preview rather than duplicated.
+- **Do not gate anything on canvas pixel sampling.** `drawImage`-based non-black
+  pixel counting reported **0 lit pixels on a preview that renders correctly**;
+  NiiVue's context has no `preserveDrawingBuffer`, so the buffer is unreadable in
+  the same frame or a later one. Milestone 2's "deterministic synthetic success
+  state" needs a different liveness signal. Visual confirmation is ground truth.
+- **`qlmanage -p` emits nothing from a non-GUI shell session** and cannot be used
+  as the automated driver. Finder spacebar worked. Extension-side logging must go
+  to a file inside the extension's sandbox container (`NSHomeDirectory()/tmp`);
+  `os_log` was not readable from the same shell.
+
 ## Risks and open questions
 
 Added after a feasibility review of the plan against the codebase. Everything the
 plan assumes about APIs checked out (see *Verified assumptions* below); these are
 the things that did not, or that the plan sequences in a way I would change.
 
-### R1 — The largest technical unknown is proved far too late (blocking)
+### R1 — The largest technical unknown is proved far too late (blocking) — **RESOLVED, see Milestone 0.5 results**
 
 Nothing in Milestones 0–3 proves that **NiiVue can render at all inside a Quick Look
 extension process**. A preview extension is a separate, heavily sandboxed,
@@ -70,7 +198,7 @@ If WebGL does not work there, Milestones 2–7 are wasted work and the product
 contract itself has to change (e.g. render server-side to a static image, or drop
 the feature). This must be settled first. See the new **Milestone 0.5**.
 
-### R2 — Memory headroom may be the real constraint (blocking, coupled to R1)
+### R2 — Memory headroom may be the real constraint (blocking, coupled to R1) — **MEASURED, proceed**
 
 Measured on the existing app with the 4 MB demo volume: **~247 MB resident in the
 WebKit content process** and ~234 MB in the app process. Most of that is baseline —
@@ -81,7 +209,7 @@ NiiVue's *baseline* WebKit footprint approaches the extension's budget before an
 file is loaded, the resource policy in Milestone 7 is not tuning, it is a
 feasibility question. Measure it in Milestone 0.5, not Milestone 7.
 
-### R3 — Extension discovery may be untestable on this machine (blocking for local QA)
+### R3 — Extension discovery may be untestable on this machine (blocking for local QA) — **RESOLVED: ad-hoc works**
 
 Finder discovers Quick Look extensions through Launch Services and runs them via
 `pluginkit`. This machine has **no Apple Development certificate** — only a
