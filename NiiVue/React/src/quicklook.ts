@@ -154,6 +154,33 @@ function showMetadataOnly(name: string, pairs: Record<string, string>, reason: s
   showFallback(`No image preview for this file — ${reason}.`)
 }
 
+/**
+ * Take ownership of drags on the canvas.
+ *
+ * NiiVue's `pointerdown` handler does not call `preventDefault`
+ * (`control/interactions.ts`), so the gesture is left "unhandled" as far as the
+ * host is concerned and two defaults fire on top of the rotation the user
+ * actually asked for:
+ *
+ * - **AppKit drags the Quick Look panel itself.** A QL panel is movable by its
+ *   background, so an unclaimed drag moves the window. That also produces the
+ *   jitter, because NiiVue keeps tracking the pointer while the window slides
+ *   out from under it — the two fight over the same delta.
+ * - **WebKit starts a text selection**, which paints the system selection
+ *   colour over the whole canvas box. `user-select: none` in the stylesheet
+ *   covers that one; this covers both.
+ *
+ * Safe because NiiVue binds **only** pointer events on the canvas —
+ * `pointerdown`, `pointerup`, `pointermove`, and no mouse listeners
+ * (`control/interactions.ts:2092-2098`) — so suppressing the compatibility
+ * mouse events costs it nothing. `preventDefault` does not stop propagation, so
+ * NiiVue's own handler still runs; capture phase only guarantees we are reached
+ * even when it returns early.
+ */
+function claimPointerGestures(): void {
+  canvas().addEventListener('pointerdown', (event) => event.preventDefault(), { capture: true })
+}
+
 /*
  * There is no ResizeObserver here, deliberately. Milestone 2 added one to keep
  * the drawing buffer matched as Finder resizes the panel; it observed the
@@ -339,6 +366,7 @@ async function main(): Promise<void> {
       meshXRay: 0.05,
     })
     await nv.attachToCanvas(canvas())
+    claimPointerGestures()
   } catch (error) {
     // Both graphics backends are gone. The native side turns this into its own
     // fallback view; without the message it would see a black rectangle.

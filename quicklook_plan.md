@@ -774,6 +774,31 @@ selection and this fix is exactly right.
 Upstream-adjacent: NiiVue arguably should `preventDefault()` on pointerdown for
 drags it consumes. The local fix stands alone regardless.
 
+### The same root cause was also dragging the Quick Look window
+
+Reported separately: dragging to rotate **moved the whole panel, as if dragging
+a titlebar**, with heavy jitter. Same missing `preventDefault`, second default
+action. A Quick Look panel is movable by its background, so an unclaimed
+pointerdown is handed to AppKit as a window drag — and the jitter is NiiVue
+still tracking the pointer while the window slides out from under it, the two
+fighting over one delta.
+
+`user-select: none` could never have fixed this half; it is a separate default.
+The page now claims the gesture:
+
+```ts
+canvas().addEventListener('pointerdown', (e) => e.preventDefault(), { capture: true })
+```
+
+Safe because NiiVue binds **only** pointer events on the canvas
+(`control/interactions.ts:2092-2098`) and no mouse listeners, so suppressing the
+compatibility mouse events costs it nothing; `preventDefault` does not stop
+propagation, so NiiVue's own handler still runs. Covered by a regression check
+that dispatches a cancelable `pointerdown` and asserts `defaultPrevented`.
+
+Both symptoms — blue cast and window drag — trace to one omission, and the two
+fixes are independent because they suppress two different default actions.
+
 ## Regression coverage added for Milestones 3–5, 7
 
 `NiiVue/React/tests/preview-regression.mjs`, run with `npm run test:preview`.

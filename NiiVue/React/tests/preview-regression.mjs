@@ -364,6 +364,21 @@ await page.waitForTimeout(300)
 const after = (await page.locator('#gl').screenshot({ type: 'png' })).toString('base64')
 check('a drag orbits the render', before !== after)
 
+// The rotation above must not ALSO reach the host. An unclaimed pointerdown
+// lets AppKit drag the Quick Look panel by its background and lets WebKit start
+// a selection — the panel jitters and turns blue. NiiVue never calls
+// preventDefault itself, so the page has to.
+const claimed = await page.evaluate(() => {
+  let prevented = null
+  const probe = (e) => { prevented = e.defaultPrevented }
+  const gl = document.getElementById('gl')
+  gl.addEventListener('pointerdown', probe)
+  gl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }))
+  gl.removeEventListener('pointerdown', probe)
+  return prevented
+})
+check('the page claims the drag instead of the host', claimed === true, `defaultPrevented=${claimed}`)
+
 // Finder resizes the panel freely; the drawing buffer must follow, or the
 // render is upscaled and soft.
 await page.setViewportSize({ width: 940, height: 700 })

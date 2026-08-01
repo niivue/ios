@@ -562,6 +562,14 @@ separate from `test:bridge` because the two pages share no code. The mesh and
 tract checks read real files from the private Git-LFS `dev-images` package by
 absolute path and print `SKIP` when it is absent.
 
+**The preview page must claim pointer gestures itself.** NiiVue's `pointerdown`
+never calls `preventDefault`, and a Quick Look panel is movable by its
+background, so an unclaimed drag both moves the window (with jitter, as NiiVue
+tracks a pointer whose window is sliding) and starts a text selection. The page
+adds a capture-phase `preventDefault` on the canvas *and* sets `user-select:
+none` — two different default actions, two fixes. Safe because NiiVue binds only
+pointer events there, never mouse events.
+
 **`quicklook.html` sets `user-select: none` on purpose.** Without it, a
 rotate-drag becomes a WebKit text selection — NiiVue's `pointerdown` does not
 `preventDefault` — and a selection touching the canvas paints the translucent
