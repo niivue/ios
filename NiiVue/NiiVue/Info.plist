@@ -21,25 +21,13 @@
 	     machine, and it is an explicit negative test for this milestone. -->
 	<key>UTExportedTypeDeclarations</key>
 	<array>
-		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>gov.nih.nifti-1-gzip</string>
-			<key>UTTypeDescription</key>
-			<string>Gzipped NIfTI-1 Volume</string>
-			<key>UTTypeReferenceURL</key>
-			<string>https://nifti.nimh.nih.gov</string>
-			<key>UTTypeConformsTo</key>
-			<array>
-				<string>org.gnu.gnu-zip-archive</string>
-			</array>
-			<key>UTTypeTagSpecification</key>
-			<dict>
-				<key>public.filename-extension</key>
-				<array>
-					<string>nii.gz</string>
-				</array>
-			</dict>
-		</dict>
+		<!-- There is deliberately NO `gov.nih.nifti-1-gzip` declaration here.
+		     It was tried and removed: it registers correctly, carries the
+		     `nii.gz` tag, and still never matches anything, because macOS
+		     resolves a type from the last extension component only. Leaving it
+		     in would be dead config that reads as if `.nii.gz` were handled.
+		     `.nii.gz` reaches the extension via `org.gnu.gnu-zip-archive` plus a
+		     content sniff instead — see QuickLookPreview/Info.plist. -->
 		<dict>
 			<key>UTTypeIdentifier</key>
 			<string>edu.mgh.freesurfer.mgh</string>

@@ -25,10 +25,27 @@
 	     declarations placed here are ignored by Launch Services. This list only
 	     says which of them we preview.
 
-	     `gov.nih.nifti-1` is Apple's own type from CoreTypes.bundle — listed, not
-	     redeclared. Note what is deliberately ABSENT: `org.gnu.gnu-zip-archive`
-	     and `public.zip-archive`. Claiming either would hijack every .gz and .zip
-	     on the machine, which is the explicit negative test for this milestone. -->
+	     `gov.nih.nifti-1` is Apple's own type from CoreTypes.bundle — listed,
+	     not redeclared.
+
+	     `org.gnu.gnu-zip-archive` is here on purpose and is the one entry that
+	     deserves scrutiny. macOS resolves a file's type from the LAST extension
+	     component only, so `.nii.gz` is *always* plain gzip — a compound
+	     `nii.gz` UTI registers happily and never matches (Apple's own tar-gzip
+	     type declares only `tgz` for the same reason). Claiming gzip is
+	     therefore the only route by which the most common neuroimaging format
+	     can reach this extension at all. Owner-approved 2026-08-01 as an
+	     explicit amendment to the "never register for public.gzip" rule.
+
+	     The obligation that comes with it: we are now the previewer for EVERY
+	     .gz on this machine, so `PreviewViewController.shouldRender` inflates a
+	     bounded prefix and renders only when the payload is genuinely NIfTI.
+	     Any other gzip gets plain archive metadata and is never drawn. Do not
+	     relax that check.
+
+	     Deliberately ABSENT: `public.zip-archive`. `.trx` is a zip container but
+	     has its own extension and therefore its own type, so there is no reason
+	     to claim zip generally. -->
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>
@@ -36,7 +53,7 @@
 			<key>QLSupportedContentTypes</key>
 			<array>
 				<string>gov.nih.nifti-1</string>
-				<string>gov.nih.nifti-1-gzip</string>
+				<string>org.gnu.gnu-zip-archive</string>
 				<string>edu.mgh.freesurfer.mgh</string>
 				<string>edu.mgh.freesurfer.mgz</string>
 				<string>org.nrrd.nrrd</string>

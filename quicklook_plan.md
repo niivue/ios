@@ -240,6 +240,33 @@ payload is not a NIfTI falls back to plain archive metadata and never renders �
 plus an explicit contract amendment, since it reverses a stated prohibition.
 If that is unacceptable, option 1 and re-scope v1.
 
+### Resolution — option 2, owner-approved 2026-08-01. Gate now PASSES 12/12.
+
+The extension claims `org.gnu.gnu-zip-archive` and decides by content.
+`gov.nih.nifti-1-gzip` was **removed** from the app's exported declarations
+rather than left in place: it registers and never matches, so keeping it would
+be dead config that reads as though `.nii.gz` were handled.
+
+`QuickLookPreview/GzipPeek.swift` inflates a bounded prefix — at most 64 KB read,
+at most 1 KB inflated — and `VolumeSniff.isNIfTI` checks `sizeof_hdr` (348/540)
+**and** the magic string (`n+1`/`ni1` at 344, `n+2`/`ni2` at 4), in both byte
+orders. The size field alone is not sufficient; 348 is a plausible leading int32
+in arbitrary data.
+
+Verified by compiling the real Swift implementation against real files:
+
+| Fixture | Inflated | NIfTI? | |
+| --- | --- | --- | --- |
+| `vol.nii.gz` | 1024 B | yes | renders |
+| `archive.tar.gz` | 1024 B | no | archive metadata only |
+| `plain.gz` | 6 B | no | archive metadata only |
+| `vol.mgz` (gzipped non-NIfTI) | 1024 B | no | archive metadata only |
+| `vol.nii` (not gzip) | n/a | no | routed by its own type |
+
+**Standing obligation:** because this extension now previews every `.gz` on the
+machine, `shouldRender` must stay strict. Do not loosen the sniff, and do not let
+a future milestone render on the strength of the filename.
+
 ## Risks and open questions
 
 Added after a feasibility review of the plan against the codebase. Everything the

@@ -18,6 +18,7 @@
 		34CD18112B45C5420015EF4C /* NiiVueUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CD18102B45C5420015EF4C /* NiiVueUITests.swift */; };
 		34CD18132B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CD18122B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift */; };
 		QL00000000000000000011 /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = QL00000000000000000001 /* PreviewViewController.swift */; };
+		QL00000000000000000012 /* GzipPeek.swift in Sources */ = {isa = PBXBuildFile; fileRef = QL00000000000000000006 /* GzipPeek.swift */; };
 		QL00000000000000000014 /* QuickLookPreview.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = QL00000000000000000004 /* QuickLookPreview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -88,6 +89,7 @@
 		34CD18102B45C5420015EF4C /* NiiVueUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiiVueUITests.swift; sourceTree = "<group>"; };
 		34CD18122B45C5420015EF4C /* NiiVueUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NiiVueUITestsLaunchTests.swift; sourceTree = "<group>"; };
 		QL00000000000000000001 /* PreviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewViewController.swift; sourceTree = "<group>"; };
+		QL00000000000000000006 /* GzipPeek.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GzipPeek.swift; sourceTree = "<group>"; };
 		QL00000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		QL00000000000000000004 /* QuickLookPreview.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = QuickLookPreview.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		QL00000000000000000005 /* QuickLookPreview.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QuickLookPreview.entitlements; sourceTree = "<group>"; };
@@ -169,6 +171,7 @@
 				QL00000000000000000005 /* QuickLookPreview.entitlements */,
 				QL00000000000000000002 /* Info.plist */,
 				QL00000000000000000001 /* PreviewViewController.swift */,
+				QL00000000000000000006 /* GzipPeek.swift */,
 			);
 			path = QuickLookPreview;
 			sourceTree = "<group>";
@@ -409,6 +412,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				QL00000000000000000011 /* PreviewViewController.swift in Sources */,
+				QL00000000000000000012 /* GzipPeek.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
