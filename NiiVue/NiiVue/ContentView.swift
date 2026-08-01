@@ -123,21 +123,14 @@ final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
 
     private static let chunkSize = 1024 * 1024
 
+    /// `cancelled` is **main-queue confined**, and so is every `task.*` call —
+    /// see `deliver(_:_:)`. A lock here would not be enough: WebKit marks a task
+    /// stopped *before* it calls `webView(_:stop:)`, so any "check a flag, then
+    /// send" sequence that spans two queues can still send to a stopped task,
+    /// and `WKURLSchemeTask` answers that with an Objective-C exception Swift
+    /// cannot catch. Sharing one queue with `stop` is what makes it atomic.
     private final class ReadState {
-        private let lock = NSLock()
-        private var cancelled = false
-
-        var isCancelled: Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            return cancelled
-        }
-
-        func cancel() {
-            lock.lock()
-            cancelled = true
-            lock.unlock()
-        }
+        var cancelled = false
     }
 
     init(root: URL) {
@@ -161,7 +154,13 @@ final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
         var components = URLComponents()
         components.scheme = Self.scheme
         components.host = Self.host
-        components.path = "/document/\(token)/\(fileName)"
+        // Encode the filename ourselves rather than letting the `path` setter do
+        // it: that setter leaves a literal `%` alone, so a file named `a%2Fb.nii`
+        // would round-trip through `url.path` as `a/b.nii` — four path components
+        // instead of three, and a refused load. Escaping everything non-alphanumeric
+        // makes the decode exact for any filename the system can produce.
+        let encoded = fileName.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        components.percentEncodedPath = "/document/\(token)/\(encoded)"
         return components.url!
     }
 
@@ -197,7 +196,10 @@ final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
         return candidate
     }
 
-    private func response(for requestURL: URL, fileURL: URL, mime: String) -> URLResponse {
+    /// Nil if the response cannot be built with its security headers. Failing
+    /// closed matters: the `URLResponse` fallback this replaced would have served
+    /// the page with no CSP and no `nosniff` rather than not at all.
+    private func response(for requestURL: URL, fileURL: URL, mime: String) -> URLResponse? {
         let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
         let length = (attributes?[.size] as? NSNumber)?.int64Value ?? -1
         var headers = [
@@ -212,16 +214,31 @@ final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
                                statusCode: 200,
                                httpVersion: "HTTP/1.1",
                                headerFields: headers)
-            ?? URLResponse(url: requestURL,
-                           mimeType: mime,
-                           expectedContentLength: Int(length),
-                           textEncodingName: mime.hasPrefix("text/") ? "utf-8" : nil)
     }
 
     private func finishRead(_ id: ObjectIdentifier) {
         readsLock.lock()
         reads.removeValue(forKey: id)
         readsLock.unlock()
+    }
+
+    /// Run `body` on the main queue unless the task has been stopped, reporting
+    /// whether it ran. `webView(_:stop:)` is delivered on the main queue too, so
+    /// the cancellation check and the `task.*` call cannot be split by a stop.
+    ///
+    /// Deliberately `sync`, not `async`: it makes the read loop wait for each
+    /// chunk to be handed over, so a large file cannot pile up as hundreds of
+    /// pending main-queue blocks each holding a megabyte. Nothing on the main
+    /// queue ever waits on this handler, so there is no inversion.
+    @discardableResult
+    private func deliver(_ state: ReadState, _ body: () -> Void) -> Bool {
+        var ran = false
+        DispatchQueue.main.sync {
+            guard !state.cancelled else { return }
+            body()
+            ran = true
+        }
+        return ran
     }
 
     private func serve(_ task: WKURLSchemeTask,
@@ -234,22 +251,21 @@ final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
         do {
             let handle = try FileHandle(forReadingFrom: fileURL)
             defer { try? handle.close() }
-            guard !state.isCancelled else { return }
-            task.didReceive(response(for: requestURL, fileURL: fileURL, mime: mime))
+            guard let response = response(for: requestURL, fileURL: fileURL, mime: mime) else {
+                deliver(state) { task.didFailWithError(URLError(.cannotParseResponse)) }
+                return
+            }
+            guard deliver(state, { task.didReceive(response) }) else { return }
 
-            while !state.isCancelled {
+            while true {
                 guard let chunk = try handle.read(upToCount: Self.chunkSize), !chunk.isEmpty else {
                     break
                 }
-                task.didReceive(chunk)
+                guard deliver(state, { task.didReceive(chunk) }) else { return }
             }
-            if !state.isCancelled {
-                task.didFinish()
-            }
+            deliver(state) { task.didFinish() }
         } catch {
-            if !state.isCancelled {
-                task.didFailWithError(error)
-            }
+            deliver(state) { task.didFailWithError(error) }
         }
     }
 
@@ -284,11 +300,13 @@ final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
         }
     }
 
+    /// Delivered on the main queue, which is what makes `deliver(_:_:)` safe.
     func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {
         let id = ObjectIdentifier(urlSchemeTask as AnyObject)
         readsLock.lock()
-        reads[id]?.cancel()
+        let state = reads[id]
         readsLock.unlock()
+        state?.cancelled = true
     }
 }
 
@@ -377,6 +395,12 @@ class WebViewManager: NSObject, ObservableObject, WKScriptMessageHandler, WKNavi
     /// crashes again immediately and loops forever.
     private var didAutoReload = false
     private var lastReloadAt = Date.distantPast
+    /// Set when the crash-loop guard declines to reload. Nothing else would ever
+    /// call `load()` again — `WebView.onAppear` fired once, at launch — so the
+    /// app would sit as a black rectangle with every bridge call dropped until it
+    /// was force-quit, and the remedy the alert implies (open a smaller image)
+    /// would silently do nothing. `allowAutoReload()` is the way back.
+    private var pageIsDead = false
 
     /// The web content process can be jetsammed under memory pressure, and WebKit
     /// also evicts it after prolonged backgrounding. Without handling this the view
@@ -392,7 +416,8 @@ class WebViewManager: NSObject, ObservableObject, WKScriptMessageHandler, WKNavi
         // is the problem", so only that case stays latched.
         let sinceLastReload = Date().timeIntervalSince(lastReloadAt)
         if didAutoReload && sinceLastReload < Self.crashLoopWindow {
-            recoveryMessage = "The viewer stopped again after restarting. The image may be too large for this device."
+            pageIsDead = true
+            recoveryMessage = "The viewer stopped again after restarting. The image may be too large for this device. Opening a smaller image will restart it."
             return
         }
         didAutoReload = true
@@ -424,9 +449,18 @@ class WebViewManager: NSObject, ObservableObject, WKScriptMessageHandler, WKNavi
     }
 
     /// Re-arm automatic recovery. Called when the user picks a new image, so the
-    /// one-shot guard applies per image rather than per app launch.
+    /// one-shot guard applies per image rather than per app launch — and it is
+    /// also the only route out of a latched crash loop. Reviving here rather than
+    /// in the alert is deliberate: a user pick is proof the user chose a
+    /// *different* image, which is exactly the condition the latch was waiting
+    /// for. `load()` is asynchronous, so the pending URL its caller sets straight
+    /// afterwards is replayed by the new ready handshake.
     func allowAutoReload() {
         didAutoReload = false
+        if pageIsDead {
+            pageIsDead = false
+            load()
+        }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -584,13 +618,27 @@ class WebViewManager: NSObject, ObservableObject, WKScriptMessageHandler, WKNavi
         }
     }
 
+    /// Why an export ended. Collapsing all of these to `nil` told every user that
+    /// a failed gzip, a torn-down page or an unwritable temp directory meant
+    /// "draw something first", which is only true for `nothingToSave`.
+    enum SaveOutcome {
+        case staged(URL)
+        case nothingToSave
+        case failed(String)
+        /// The page was replaced mid-save. The recovery alert already explains
+        /// that, so the caller should stay quiet — but it must still clear its
+        /// in-flight flag, which is why this is a case and not a dropped callback.
+        case superseded
+    }
+
+    /// Must match `TEARDOWN_ERROR` in `React/src/bridge.ts`.
+    private static let teardownError = "niivue-bridge: viewer torn down"
+
     /// Export the drawing layer to a temporary file, ready to hand to a save panel.
     /// `saveVolume` is asynchronous in NiiVue 1.0, so this awaits the JS promise.
-    /// - Parameter completion: the staged file URL, or nil if there was nothing to
-    ///   save or the export failed.
-    func saveDrawing(baseImageUrl: String, completion: @escaping (URL?) -> Void) {
+    func saveDrawing(baseImageUrl: String, completion: @escaping (SaveOutcome) -> Void) {
         guard isViewerReady else {
-            completion(nil)
+            completion(.failed("The viewer is not running."))
             return
         }
         let session = pageSession
@@ -599,18 +647,32 @@ class WebViewManager: NSObject, ObservableObject, WKScriptMessageHandler, WKNavi
             in: nil,
             in: .page
         ) { [weak self] result in
-            guard let self, self.pageSession == session, self.isViewerReady else { return }
+            guard let self, self.pageSession == session, self.isViewerReady else {
+                completion(.superseded)
+                return
+            }
             switch result {
             case .success(let value):
                 guard let base64 = value as? String, !base64.isEmpty else {
                     print("saveDrawing: nothing to save")
-                    completion(nil)
+                    completion(.nothingToSave)
                     return
                 }
-                self.writeDrawingToTemp(base64, baseImageUrl: baseImageUrl, completion: completion)
+                self.writeDrawingToTemp(base64, baseImageUrl: baseImageUrl) { url in
+                    guard let url else {
+                        completion(.failed("The drawing could not be written to disk."))
+                        return
+                    }
+                    completion(.staged(url))
+                }
             case .failure(let error):
-                print("saveDrawing failed: \(error.localizedDescription)")
-                completion(nil)
+                let description = error.localizedDescription
+                print("saveDrawing failed: \(description)")
+                // The bridge throws this sentinel when queued work outlives the
+                // controller; blaming the drawing for it would be wrong.
+                completion(.failed(description.contains(Self.teardownError)
+                    ? "The viewer restarted before the drawing could be saved."
+                    : description))
             }
         }
     }
@@ -852,18 +914,26 @@ struct ContentView: View {
         Button(action: {
             guard !saveInFlight, !exportPresented else { return }
             saveInFlight = true
-            webViewManager.saveDrawing(baseImageUrl: pickedDocumentURL?.lastPathComponent ?? "image.nii.gz") { url in
+            webViewManager.saveDrawing(baseImageUrl: pickedDocumentURL?.lastPathComponent ?? "image.nii.gz") { outcome in
                 saveInFlight = false
-                guard let url else {
+                switch outcome {
+                case .staged(let url):
+                    // Let the user choose the destination. On Catalyst this is a
+                    // real NSSavePanel; on iOS/iPadOS it is the Files "Save to"
+                    // sheet. Either way the file lands somewhere reachable.
+                    exportURL = url
+                    exportPresented = true
+                case .nothingToSave:
                     saveAlertMessage = "Nothing was saved — draw something first."
                     showingSaveAlert = true
-                    return
+                case .failed(let reason):
+                    saveAlertMessage = "The drawing could not be saved. \(reason)"
+                    showingSaveAlert = true
+                case .superseded:
+                    // The recovery alert covers it; a second alert would only
+                    // blame the drawing for the page dying.
+                    break
                 }
-                // Let the user choose the destination. On Catalyst this is a real
-                // NSSavePanel; on iOS/iPadOS it is the Files "Save to" sheet.
-                // Either way the file lands somewhere the user can find it.
-                exportURL = url
-                exportPresented = true
             }
         })
         {
@@ -1217,6 +1287,18 @@ struct ContentView: View {
             Button("OK", role: .cancel) { }
         }
         .sheet(isPresented: $exportPresented) { exportSheet }
+        // `DocumentExporter.onFinish` covers the two delegate outcomes, but a
+        // swipe-dismissed SwiftUI sheet dismantles the representable without
+        // routing through either — leaving a full-size volume in tmp/ and a
+        // non-nil exportURL that makes the next save orphan another one. This is
+        // idempotent: on the delegate paths exportURL is already nil by now, and
+        // the picker copies the file before its callback fires, so a removal can
+        // never race the export itself.
+        .onChange(of: exportPresented) { presented in
+            guard !presented, let url = exportURL else { return }
+            try? FileManager.default.removeItem(at: url)
+            exportURL = nil
+        }
         .background(Color.black)
 #if targetEnvironment(macCatalyst)
         // Only the Catalyst settings frame reads this; measuring on iOS would write

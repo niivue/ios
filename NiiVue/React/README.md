@@ -20,6 +20,15 @@ npm run dev      # vite --host --open — opens a browser; also binds on the LAN
 npm run build    # tsc -b && vite build -> ./dist, which Xcode copies into the app
 npm run lint
 npm run preview  # serve the production build locally
+npm run test:bridge   # headless regression checks against ./dist (see below)
+```
+
+`test:bridge` needs Playwright, which is deliberately **not** in `package.json` —
+the Xcode build phase runs `npm ci` on a fresh clone and should not have to pull a
+browser stack to compile the app. Install it locally or globally first:
+
+```bash
+npm i -D playwright && npx playwright install chromium
 ```
 
 `NiiVue.xcodeproj` runs the build in a build phase, so an Xcode build picks up
@@ -36,7 +45,7 @@ installs `window.niivueBridge` — the functions `WebViewManager` (in
 
 | Channel | Payload | Handled by |
 | --- | --- | --- |
-| `updateUI` | the literal string `"ready"` | sets `isViewerReady = true` |
+| `updateUI` | `"ready"`, or `error: <message>` if both graphics backends fail in `attachToCanvas` | `"ready"` sets `isViewerReady = true`; any other body raises the "viewer could not start" alert |
 | `locationChange` | `JSON.stringify(e.detail.mm)` | `private(set) var location` |
 | `logMessage` | diagnostics; printed as `niivue: …` in the Xcode console | `print` |
 
@@ -93,3 +102,11 @@ Files, the readiness handshake) can only be exercised on a simulator or device.
   native same-origin scheme handler; it is not copied into a base64 JS argument.
   `setDragMode` targets NiiVue's `primaryDragMode` (the left / one-finger drag),
   defaulting to `DRAG_MODE.crosshair`.
+- `meshXRay: 0.05` in the constructor is not about meshes. Any non-zero value
+  enables an extra depth-disabled pass (`gl/NVViewGL.ts`, `if (xrayAlpha > 0)`)
+  that re-draws the crosshair over the render tile, so the crosshair can be seen
+  *through* a volume render instead of only where it exits the surface.
+- `tests/bridge-regression.mjs` drives the built `dist/` in headless Chromium and
+  asserts the three checks that have each caught a shipped bug: the smoke path
+  (12 bridge functions → pen stroke → gzipped NIfTI header), a corrupt file
+  leaving the drawing intact, and a left drag moving the crosshair.

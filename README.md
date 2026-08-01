@@ -8,11 +8,12 @@ The native components of the application are written in Swift, and the medical i
 
 - View MRI/CT images in common formats used in medical research
 - Draw and segment images (Apple Pencil is supported as a touch device)
-- Save and load images from the local device (no data is sent to a server)
+- Open images from the local device (no data is sent to a server)
 - Works in Airplane mode
 - Customise viewing options (e.g. window/level, zoom/pan, etc.)
 - Multiple layouts supported
-- Save drawings to the Files app on iPhone/iPad
+- Save drawings wherever you choose — the Files "Save to" sheet on iPhone/iPad,
+  a real `NSSavePanel` on macOS
 - A bundled demo volume (`T1w_DEMO.nii.gz`) loads automatically at launch
 
 ## macOS support
@@ -128,7 +129,10 @@ below. Connect the device, then `xcrun devicectl list devices` to find it and us
 its UDID as the destination `id`, or just use Xcode's Run button.
 
 Either way the app opens on the bundled demo volume; the **+** button opens the
-document picker for your own `.nii` / `.nii.gz` files.
+document picker. It is deliberately unfiltered — NiiVue reads NIfTI plus mgh/mgz,
+nrrd/nhdr, mha/mhd, mif/mih, AFNI, npy/npz, vmr/v16, src, fib, ecat and more, and
+almost none of those have a registered system UTI — so a file the renderer rejects
+raises a named alert rather than being greyed out in the picker.
 
 **Signing.** To see which certificates this Mac holds, which Apple team they
 belong to, and therefore which targets will build:
@@ -172,3 +176,7 @@ simulator or device.
 
 See [`NiiVue/React/README.md`](NiiVue/React/README.md) for the bridge contract and
 [`CLAUDE.md`](CLAUDE.md) for architecture notes and the NiiVue 0.41 → 1.0 API map.
+
+### Quick Look Preview
+
+On MacOS, this tool also provides a Quick Look Preview extension. It can view many voxel -based images (e.g. NIfTI, MGH), meshes (GIFTI) and streamlines (TRK, TRX, TCK). This is a differentiator relative to other voxel-based viewers including [NIfTIViewQL](https://github.com/pmolfese/NIfTIViewQL) and [MIQ](https://github.com/marcoduering/MIQ).

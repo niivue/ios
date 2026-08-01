@@ -101,6 +101,14 @@ export async function startNiiVue(
     // Always show the 3D render tile alongside the 2D planes in multiplanar
     // views (the pre-1.0 `multiplanarForceRender` option).
     showRender: SHOW_RENDER.ALWAYS,
+    // Despite the name this is not mesh-only: any non-zero value enables an
+    // extra depth-disabled pass (gl/NVViewGL.ts, `if (xrayAlpha > 0)`) that
+    // re-draws the crosshair — and meshes, when there are any — over the render
+    // tile. Without it the crosshair inside a volume render is hidden by the
+    // surface and only its stubs are visible where they exit the head. 0.05 is
+    // faint on purpose: enough to locate the crosshair in 3D, not enough to read
+    // as an artefact.
+    meshXRay: 0.05,
     // `primaryDragMode` is the LEFT/one-finger drag, `secondaryDragMode` the
     // right drag. NiiVue 1.0 defaults primary to `crosshair` (drag moves the
     // crosshair) and secondary to `contrast`; keep that — 0.41's single
@@ -176,12 +184,19 @@ export async function startNiiVue(
         // cannot parse, and closing first would destroy the user's drawing over
         // a volume that then stays on screen — silent data loss on a bad pick.
         await nv.loadVolumes([{ url, name: fileName }])
-        // A newer request or teardown may have arrived while the source was
-        // loading. Do not commit the old request's drawing mutation.
-        if (destroyed || generation !== loadGeneration) return false
+        if (destroyed) return false
         // The drawing belonged to the volume just replaced; its dimensions need
         // not match the new one, so it goes only once the swap has succeeded.
+        //
+        // This runs even when a newer pick has superseded this one. `loadVolumes`
+        // swaps the volume without touching `drawingVolume`, so the moment the
+        // await above resolves the drawing is stale — and if the newer pick then
+        // fails (a corrupt file, deliberately preserving the drawing), returning
+        // early here would strand the previous volume's drawing on top of this
+        // one indefinitely: wrong dimensions on screen and a wrong header on save.
         nv.closeDrawing()
+        // Only the newest request may report success back to the host.
+        if (generation !== loadGeneration) return false
         postToHost('logMessage', `loaded ${fileName}`)
         return true
       })

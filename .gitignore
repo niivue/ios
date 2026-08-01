@@ -1,7 +1,7 @@
 .DS_Store
 node_modules
 audit*.md
-
+*_plan.md
 # Xcode per-user state (was tracked by mistake, including another developer's UI state)
 xcuserdata/
 *.xcuserstate
