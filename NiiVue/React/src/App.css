@@ -1,3 +1,17 @@
-.no-focus {
-    outline: none;
+.niivue-container {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  background-color: black;
+}
+
+.niivue-canvas {
+  height: 100%;
+  width: 100%;
+  outline: none;
+  /* The host app owns text selection and long-press gestures. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }

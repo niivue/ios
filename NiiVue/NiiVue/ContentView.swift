@@ -10,7 +10,15 @@ import WebKit
 import Foundation
 import UniformTypeIdentifiers
 
-typealias MessageCallback = (String) -> Void
+private func encodeFileToBase64(url: URL) -> String? {
+    do {
+        let fileData = try Data(contentsOf: url)
+        return fileData.base64EncodedString()
+    } catch {
+        print("Error reading file: \(error)")
+        return nil
+    }
+}
 
 struct DocumentPicker: UIViewControllerRepresentable {
     @Binding var presented: Bool // To control the presentation state
@@ -57,209 +65,259 @@ struct DocumentPicker: UIViewControllerRepresentable {
     }
 }
 
-class WebViewManager: NSObject, ObservableObject, WKScriptMessageHandler {
-//    let webView: WKWebView
-    @Published var webView: WKWebView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-    var messageHandlers: [String: MessageCallback]
-    var url: URL = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "dist")! // promise that it will be there
-    
-    init(messageHandlers: [String: MessageCallback] = [:]) {
-        self.messageHandlers = messageHandlers
-        super.init()
-        setupWebView()
-    }
-    
-    private func setupWebView() {
-            let config = WKWebViewConfiguration()
-            // Setting up the user content controller and registering script message handlers
-            for (handlerName, _) in messageHandlers {
-                config.userContentController.add(self, name: handlerName)
-            }
-            config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
-            config.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
-            config.userContentController.add(self, name: "messageHandler")
+/// Prevent WKUserContentController from retaining its owner through the
+/// script-message handler registration.
+private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
+    weak var delegate: WKScriptMessageHandler?
 
-            self.webView = WKWebView(frame: .zero, configuration: config)
-            self.webView.allowsBackForwardNavigationGestures = false
-            self.webView.underPageBackgroundColor = UIColor.black
-            self.webView.isOpaque = false
-            self.webView.backgroundColor = UIColor.clear
-            self.webView.isInspectable = true
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        delegate?.userContentController(userContentController, didReceive: message)
+    }
+}
+
+/// Drives the NiiVue web app inside a WKWebView.
+///
+/// Every viewer command goes through `window.niivueBridge` (installed by
+/// `React/src/bridge.ts`); the web app reports back over the script message
+/// handlers registered below.
+class WebViewManager: NSObject, ObservableObject, WKScriptMessageHandler {
+    let webView: WKWebView
+
+    /// True once the web app has attached NiiVue and installed `window.niivueBridge`.
+    /// Nothing may be sent to the bridge before this flips.
+    @Published var isViewerReady = false
+    /// Latest crosshair position, as the JSON mm array NiiVue reports.
+    @Published var location: String = ""
+
+    private let contentController: WKUserContentController
+    private let messageHandler: WeakScriptMessageHandler
+    private let url: URL = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "dist")! // promise that it will be there
+
+    /// Message handler names the web app posts to.
+    private static let channels = ["updateUI", "logMessage", "locationChange"]
+
+    override init() {
+        let controller = WKUserContentController()
+        let config = WKWebViewConfiguration()
+        config.userContentController = controller
+        config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+        config.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.allowsBackForwardNavigationGestures = false
+        webView.underPageBackgroundColor = UIColor.black
+        webView.isOpaque = false
+        webView.backgroundColor = UIColor.clear
+        webView.isInspectable = true
+        // The viewer fills the web view; the native UI supplies all scrolling.
+        webView.scrollView.bounces = false
+        webView.scrollView.isScrollEnabled = false
+
+        self.contentController = controller
+        self.webView = webView
+        self.messageHandler = WeakScriptMessageHandler()
+        super.init()
+
+        messageHandler.delegate = self
+        for channel in Self.channels {
+            controller.add(messageHandler, name: channel)
         }
-    
-        // Handle received messages dynamically
-        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            if let callback = messageHandlers[message.name], let messageBody = message.body as? String {
-                callback(messageBody)
-            }
+    }
+
+    deinit {
+        for channel in Self.channels {
+            contentController.removeScriptMessageHandler(forName: channel)
         }
-    
-    private func saveBase64StringToNifti(_ base64String: String, baseImageUrl: String) {
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        let body = message.body as? String ?? ""
+        switch message.name {
+        case "updateUI":
+            isViewerReady = true
+        case "logMessage":
+            print("niivue: \(body)")
+        case "locationChange":
+            location = body
+        default:
+            break
+        }
+    }
+
+    /// Write a base64 `.nii.gz` payload into the app's Documents folder.
+    /// - Returns: the file URL on success.
+    @discardableResult
+    private func saveBase64StringToNifti(_ base64String: String, baseImageUrl: String) -> URL? {
         // make sure the following properties are added to Info.plist and set to YES
         // Application supports iTunes file sharing : YES
         // Supports opening documents in place : YES
         guard let data = Data(base64Encoded: base64String) else {
             print("Error: Base64 string is malformed.")
-            return
+            return nil
         }
-        let date = Date()
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "YYYY-MM-dd_HH-mm-ss"
-        let dateString = dateFormatter.string(from: date)
-        let url = URL.documentsDirectory.appendingPathComponent("drawing_\(dateString)_\(baseImageUrl)")
+        dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        let dateString = dateFormatter.string(from: Date())
+        // The bridge always returns gzipped NIfTI, so name the output for what it
+        // is rather than inheriting the source image's extension.
+        var stem = (baseImageUrl as NSString).lastPathComponent
+        for suffix in [".nii.gz", ".nii"] where stem.lowercased().hasSuffix(suffix) {
+            stem = String(stem.dropLast(suffix.count))
+            break
+        }
+        let id = UUID().uuidString.prefix(8)
+        let url = URL.documentsDirectory.appendingPathComponent("drawing_\(dateString)_\(id)_\(stem).nii.gz")
         do {
             try data.write(to: url, options: [.atomic, .completeFileProtection])
-            
-            // check that the file exists and log the file size
-            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-            if let fileSize = attributes[.size] as? NSNumber {
-                print("File written with size: \(fileSize.intValue) bytes")
-            }
+            print("Drawing written to \(url.lastPathComponent) (\(data.count) bytes)")
+            return url
         } catch {
-            print("Failed to write or check file:", error.localizedDescription)
+            print("Failed to write drawing:", error.localizedDescription)
+            return nil
         }
     }
-    
+
     // load the default page from the react app
     func load() {
-        webView.loadFileURL(url, allowingReadAccessTo: url)
+        isViewerReady = false
+        // Grant read access to the whole build directory, not just index.html —
+        // the page pulls its JS/CSS bundles from ./assets.
+        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     }
-    
-    func loadBase64Image(base64: String, fileName: String) {
-        webView.evaluateJavaScript("window.loadBase64Image('\(base64)','\(fileName)')") {(result, error) in
-            if error == nil {
-                print(result ?? "")
+
+    /// Run a `window.niivueBridge` call, logging any JS-side failure.
+    private func call(_ expression: String) {
+        guard isViewerReady else {
+            print("niivueBridge not ready; dropped \(expression)")
+            return
+        }
+        webView.evaluateJavaScript("window.niivueBridge.\(expression)") { _, error in
+            if let error {
+                print("niivueBridge.\(expression) failed: \(error.localizedDescription)")
             }
         }
     }
-    
-    func saveDrawing(baseImageUrl: String) -> Bool {
-        var ok = false
-        webView.evaluateJavaScript("window.saveDrawing()") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-                print("result was above!")
-                self.saveBase64StringToNifti(result as! String, baseImageUrl: baseImageUrl)
-                ok = true
-            } else {
-                print(error ?? "")
-                ok = false
+
+    /// Hand the image to NiiVue. The payload is passed as a JS argument rather
+    /// than interpolated into source — base64 volumes run to tens of megabytes.
+    func loadBase64Image(base64: String, fileName: String, completion: ((Bool) -> Void)? = nil) {
+        guard isViewerReady else {
+            print("niivueBridge not ready; could not load \(fileName)")
+            completion?(false)
+            return
+        }
+        webView.callAsyncJavaScript(
+            "await window.niivueBridge.loadBase64Image(base64, fileName); return true;",
+            arguments: ["base64": base64, "fileName": fileName],
+            in: nil,
+            in: .page
+        ) { result in
+            switch result {
+            case .success:
+                completion?(true)
+            case .failure(let error):
+                print("loadBase64Image failed: \(error.localizedDescription)")
+                completion?(false)
             }
         }
-        return ok // TODO: this does not seem to ever be true, but file saving does work...
     }
-    
+
+    /// Export the drawing layer and write it to Documents.
+    /// `saveVolume` is asynchronous in NiiVue 1.0, so this awaits the JS promise.
+    func saveDrawing(baseImageUrl: String, completion: @escaping (Bool) -> Void) {
+        guard isViewerReady else {
+            completion(false)
+            return
+        }
+        webView.callAsyncJavaScript(
+            "return await window.niivueBridge.saveDrawing();",
+            in: nil,
+            in: .page
+        ) { [weak self] result in
+            switch result {
+            case .success(let value):
+                guard let base64 = value as? String, !base64.isEmpty else {
+                    print("saveDrawing: nothing to save")
+                    completion(false)
+                    return
+                }
+                completion(self?.saveBase64StringToNifti(base64, baseImageUrl: baseImageUrl) != nil)
+            case .failure(let error):
+                print("saveDrawing failed: \(error.localizedDescription)")
+                completion(false)
+            }
+        }
+    }
+
     func setCrosshairColor() {
-        webView.evaluateJavaScript("window.setCrosshairColor()") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-            }
-        }
+        call("setCrosshairColor()")
     }
-    
+
     // set multiplanar layout in Niivue
     // 0 = auto
     // 1 = column
     // 2 = grid
     // 3 = row
     func setLayout(layout: Int) {
-        webView.evaluateJavaScript("window.setLayout(\(layout))") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-            }
-        }
+        call("setLayout(\(layout))")
     }
-    
-    // show 3D crosshair or not in Niivue
+
+    // show the 3D crosshair or not in Niivue
     func set3dCrosshairVisible(visible: Bool) {
-        webView.evaluateJavaScript("window.set3dCrosshairVisible(\(visible))") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-            }
-        }
+        call("set3dCrosshairVisible(\(visible))")
     }
-    
-    // show 3D crosshair or not in Niivue
+
+    // show the 2D crosshair or not in Niivue
     func set2dCrosshairVisible(visible: Bool) {
-        webView.evaluateJavaScript("window.set2dCrosshairVisible(\(visible))") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-            }
-        }
+        call("set2dCrosshairVisible(\(visible))")
     }
-    
+
     // set sliceType in Niivue
     func setSliceType(sliceType: Int) {
-        webView.evaluateJavaScript("window.setSliceType(\(sliceType))") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-            }
-        }
+        call("setSliceType(\(sliceType))")
     }
-    
+
     // set drag mode in Niivue
     func setDragMode(dragMode: Int) {
-        webView.evaluateJavaScript("window.setDragMode(\(dragMode))") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-            }
-        }
+        call("setDragMode(\(dragMode))")
     }
-    
+
     // set pen value for drawing in Niivue
     func setPenValue(penValue: Int, isFilled: Bool, drawingEnabled: Bool) {
-        webView.evaluateJavaScript("window.setPenValue(\(penValue), \(isFilled), \(drawingEnabled))") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-            }
-        }
+        call("setPenValue(\(penValue), \(isFilled), \(drawingEnabled))")
     }
-    
-    // set orientation text to corners or not
-    func setCornerText(isCorners: Bool) {
-        webView.evaluateJavaScript("window.setCornerText(\(isCorners))") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-            }
-        }
+
+    // show the L/R/A/P/S/I orientation labels or not.
+    // NiiVue 1.0 dropped the corner-vs-edge placement option, so this is a
+    // straight visibility toggle.
+    func setOrientationText(visible: Bool) {
+        call("setOrientationText(\(visible))")
     }
-    
+
     // set orientation cube
     func setOrientationCube(isOrientationCube: Bool) {
-        webView.evaluateJavaScript("window.setOrientationCube(\(isOrientationCube))") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-            }
-        }
+        call("setOrientationCube(\(isOrientationCube))")
     }
-    
+
     // set radiological or not
     func setRadiological(isRadiological: Bool) {
-        webView.evaluateJavaScript("window.setRadiological(\(isRadiological))") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-            }
-        }
+        call("setRadiological(\(isRadiological))")
     }
-    
+
     // move slice by one vox in any plane
     func moveCrosshairInVox(_ x: Int, _ y: Int, _ z: Int) {
-        webView.evaluateJavaScript("window.moveCrosshairInVox(\(x),\(y),\(z))") {(result, error) in
-            if error == nil {
-                print(result ?? "")
-            }
-        }
+        call("moveCrosshairInVox(\(x),\(y),\(z))")
     }
-    
+
 }
 
 struct WebView: UIViewRepresentable {
-    @ObservedObject var manager: WebViewManager
-    
+    let manager: WebViewManager
+
     func makeUIView(context: Context) -> WKWebView {
         return manager.webView
     }
-    
+
     func updateUIView(_ uiView: WKWebView, context: Context) {
         // This function can be used to update the view when SwiftUI state changes.
         // However, with the WebViewManager handling WebView actions, this may not be needed.
@@ -268,31 +326,14 @@ struct WebView: UIViewRepresentable {
 
 
 struct ContentView: View {
-//    @StateObject private var webViewManager = WebViewManager()
     @EnvironmentObject var sharedData: SharedData
-//    var webViewManager: WebViewManager? = nil
-    var webViewManager = WebViewManager(messageHandlers: [
-        "updateUI": { data in
-                print("data \(data)") // TODO: implement these better !!!!!!
-        },
-        "logMessage": { message in
-            print("Log message received: \(message)")
-            // Handle logging or debugging tasks
-        },
-        "locationChange": {location in
-//            sharedData.location = location
-            print(location)
-        },
-        "finishedLoading": {message in
-            print("finished loading message: ")
-            print(message)
-        }
-    ])
-    @State private var isWebviewLoading = false // TODO: implement this!
+    @StateObject private var webViewManager = WebViewManager()
     @State private var documentPickerPresented = false
     @State private var settingsSheetPresented = false
     @State private var pickedDocumentURL: URL?
+    @State private var pendingImageURL: URL?
     @State private var base64EncodedString: String?
+    @State private var imageLoadRequest = 0
     @State private var sliceType = SliceTypes.Multiplanar.rawValue // default sliceType is multiplanar
     @State private var layout = LayoutTypes.Auto.rawValue // the default is Auto
     @State private var dragType = DragTypes.Contrast.rawValue // the default is Contrast
@@ -301,11 +342,11 @@ struct ContentView: View {
     @State private var penValue = PenTypes.Red.rawValue // default is red
     @State private var drawingEnabled = false // can the user draw?
     @State private var isFilled = true // is the pen filled or not?
-    @State private var cornerText = false // put orientation labels in the corder or not?
+    @State private var orientationText = true // show the L/R/A/P/S/I labels?
     @State private var orientationCube = false // by default the 3D orientation cube is hidden
     @State private var radiological = false // use radiological convention or not in Niivue
-    @State private var saveFileAlert = false
     @State private var showingSaveAlert = false
+    @State private var saveAlertMessage = ""
     @State private var incrementText = ""
     @State private var decrementText = ""
     @State private var sliceTypeText = ""
@@ -355,14 +396,20 @@ struct ContentView: View {
 #endif
     
     
-    func encodeFileToBase64(url: URL) -> String? {
-        do {
-            let fileData = try Data(contentsOf: url)
-            let base64String = fileData.base64EncodedString()
-            return base64String
-        } catch {
-            print("Error reading file: \(error)")
-            return nil
+    /// Read large volumes away from the main thread. Newer requests supersede
+    /// older ones so a slow file read cannot replace a later selection.
+    func loadImage(from url: URL) {
+        imageLoadRequest += 1
+        let request = imageLoadRequest
+        pendingImageURL = url
+        DispatchQueue.global(qos: .userInitiated).async {
+            let base64 = encodeFileToBase64(url: url)
+            DispatchQueue.main.async {
+                guard request == imageLoadRequest, let base64 else { return }
+                pendingImageURL = nil
+                pickedDocumentURL = url
+                base64EncodedString = base64
+            }
         }
     }
     
@@ -392,21 +439,52 @@ struct ContentView: View {
     
     var shareButton: some View {
         Button(action: {
-            let date = Date()
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "YYYY-MM-dd_HH-mm-ss"
-            let dateString = dateFormatter.string(from: date) + ".nii.gz"
-            let ok = webViewManager.saveDrawing(baseImageUrl: pickedDocumentURL?.lastPathComponent ?? dateString) // default is date string + .nii.gz
-            showingSaveAlert = true
+            webViewManager.saveDrawing(baseImageUrl: pickedDocumentURL?.lastPathComponent ?? "image.nii.gz") { ok in
+                saveAlertMessage = ok
+                    ? "Drawing saved to the app folder."
+                    : "Nothing was saved — draw something first."
+                showingSaveAlert = true
+            }
         })
         {
             Image(systemName: "square.and.arrow.up")
                 .padding()
                 .foregroundColor(.white) // Ensure the "+" icon is visible on a black background
         }
-        .alert("Drawing saved to app folder", isPresented: $showingSaveAlert) {
-            Button("OK", role: .cancel) { }
+    }
+
+    /// Read the sample volume shipped in the bundle and hand it to the viewer.
+    func loadDemoImage() {
+        guard pickedDocumentURL == nil, pendingImageURL == nil else { return }
+        guard let url = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples") else {
+            print("bundled sample image is missing")
+            return
         }
+        // Setting pickedDocumentURL also puts the name in the top-left of the UI.
+        loadImage(from: url)
+    }
+
+    func loadSelectedImage() {
+        guard webViewManager.isViewerReady,
+              let base64 = base64EncodedString,
+              let url = pickedDocumentURL else { return }
+        webViewManager.loadBase64Image(base64: base64, fileName: url.lastPathComponent) { success in
+            if success && drawingEnabled {
+                webViewManager.setPenValue(penValue: penValue, isFilled: isFilled, drawingEnabled: true)
+            }
+        }
+    }
+
+    func applyViewerSettings() {
+        webViewManager.setSliceType(sliceType: sliceType)
+        webViewManager.setLayout(layout: layout)
+        webViewManager.setDragMode(dragMode: dragType)
+        webViewManager.set3dCrosshairVisible(visible: show3dCrosshair)
+        webViewManager.set2dCrosshairVisible(visible: show2dCrosshair)
+        webViewManager.setPenValue(penValue: penValue, isFilled: isFilled, drawingEnabled: drawingEnabled)
+        webViewManager.setOrientationText(visible: orientationText)
+        webViewManager.setOrientationCube(isOrientationCube: orientationCube)
+        webViewManager.setRadiological(isRadiological: radiological)
     }
     
     var body: some View {
@@ -438,11 +516,8 @@ struct ContentView: View {
                 }
                 .sheet(isPresented: $documentPickerPresented) {
                     DocumentPicker(presented: $documentPickerPresented) { url in
-                        pickedDocumentURL = url
                         // Handle the picked document URL
-                        if let encodedString = encodeFileToBase64(url: url) {
-                            base64EncodedString = encodedString
-                        }
+                        loadImage(from: url)
                     }
                 } // add image (plus) sheet end
                 // -------------------------------------------------------------
@@ -561,7 +636,7 @@ struct ContentView: View {
                             //-------------------------------------------------------
                             // Corner labels switch
                             HStack {
-                                Toggle("Corner text", isOn: $cornerText)
+                                Toggle("Orientation labels", isOn: $orientationText)
                                     .padding()
                             }
                             //-------------------------------------------------------
@@ -647,31 +722,21 @@ struct ContentView: View {
             WebView(manager: webViewManager)
                 .onAppear {
                     webViewManager.load()
-                    // load the demo image after a small delay since we need the
-                    // web page to be ready prior to loading
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-                        // this is a stupid necessity when describing file paths
-                        var url: URL = Bundle.main.url(forResource: "T1w_DEMO.nii", withExtension: "gz", subdirectory: "samples")!
-                        // updating pickedDocumentURL will automatically set the name in the top left corner of the UI
-                        pickedDocumentURL = url
-                        //print("\(String(describing: pickedDocumentURL!.lastPathComponent))")
-                        if let encodedString = encodeFileToBase64(url: url) {
-                            // setting base64EncodedString will trigger the
-                            // loading of a new image in NiiVue
-                            base64EncodedString = encodedString
-                        }
-                    }
-                    
                 } // onAppear
                 .background(Color.black)
                 .padding()
         }
-        .onChange(of: base64EncodedString) { newValue in
-            // Call a function or handle the change
-            print("Base64 string updated")
-            if let safeBase64 = newValue {
-                webViewManager.loadBase64Image(base64: safeBase64, fileName: "\(String(describing: pickedDocumentURL!.lastPathComponent))")
+        // The web app posts "updateUI" once NiiVue is attached and the bridge is
+        // installed; that replaces the old fixed delay before the first load.
+        .onChange(of: webViewManager.isViewerReady) { ready in
+            if ready {
+                loadDemoImage()
+                loadSelectedImage()
+                applyViewerSettings()
             }
+        }
+        .onChange(of: base64EncodedString) { _ in
+            loadSelectedImage()
         }
         .onChange(of: sliceType) { newValue in
             print("sliceType updated to: \(newValue)")
@@ -714,9 +779,9 @@ struct ContentView: View {
             print("drawingEnabled updated to: \(newValue)")
             webViewManager.setPenValue(penValue: penValue, isFilled: isFilled, drawingEnabled: newValue)
         }
-        .onChange(of: cornerText) { newValue in
-            print("cornerText updated to: \(newValue)")
-            webViewManager.setCornerText(isCorners: newValue)
+        .onChange(of: orientationText) { newValue in
+            print("orientationText updated to: \(newValue)")
+            webViewManager.setOrientationText(visible: newValue)
         }
         .onChange(of: orientationCube) { newValue in
             print("orientationCube updated to: \(newValue)")
@@ -729,6 +794,9 @@ struct ContentView: View {
         .onChange(of: penValue) { newValue in
             print("penValue updated to: \(newValue)")
             webViewManager.setPenValue(penValue: newValue, isFilled: isFilled, drawingEnabled: drawingEnabled)
+        }
+        .alert(saveAlertMessage, isPresented: $showingSaveAlert) {
+            Button("OK", role: .cancel) { }
         }
         .background(Color.black)
     }

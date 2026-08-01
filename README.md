@@ -31,4 +31,23 @@ The Niivue iOS application is is primarily designed for iPhone and iPad, but it 
 
 ## Development - Getting Started
 
-TBD
+The app is a SwiftUI shell around a `WKWebView` that renders with
+[NiiVue](https://github.com/niivue/niivue). The web viewer lives in
+[`NiiVue/React`](NiiVue/React) and is documented in its own
+[README](NiiVue/React/README.md).
+
+Requirements: Xcode with the iOS platform installed, and Node.js 20.19+ (for
+the Vite 8 build).
+
+```bash
+cd NiiVue/React
+npm install
+npm run build     # produces NiiVue/React/dist, which the app bundles
+```
+
+Then open `NiiVue/NiiVue.xcodeproj` and run. An Xcode build phase re-runs
+`npm run build`, so `npm install` only has to be done once.
+
+To iterate on the viewer without rebuilding the app, `npm run dev` serves it in
+a desktop browser; the native bridge degrades to no-ops there and the viewer can
+be driven from the devtools console (`niivueBridge.setSliceType(0)`).
