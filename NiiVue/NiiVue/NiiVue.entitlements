@@ -6,5 +6,12 @@
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- Mac Catalyst only. UIDocumentPickerViewController is backed by NSOpenPanel
+	     when importing and NSSavePanel when exporting (DocumentExporter), and the
+	     sandbox denies both without this. read-WRITE, not read-only: the export
+	     path writes to a location the user chooses, which read-only does not
+	     cover. Unused on iOS, where the picker brokers access itself. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
 </dict>
 </plist>

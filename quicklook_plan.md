@@ -1,0 +1,528 @@
+# Quick Look Preview Extension Plan
+
+Status: product decisions approved. This plan adds a Finder Quick Look preview
+to the existing Mac Catalyst app without changing the app into a general file
+handler.
+
+## Product contract
+
+- Target Finder Quick Look on macOS through the Catalyst app. Keep iOS/iPadOS
+  Files integration out of v1.
+- Add a view-controller-based Quick Look Preview Extension using
+  `UIViewController` and `QLPreviewingController`.
+- Host a minimal offline NiiVue page in `WKWebView`. Do not use the app's
+  base64 file bridge.
+- Permit viewing interactions only: resize, orbit, zoom, slice scrolling, and
+  crosshair movement. Exclude drawing, saving, settings, menus, and links.
+- Show voxel data as equal-size Axial, Coronal, Sagittal, and Render quadrants.
+  Use neurological orientation and an initially centered crosshair.
+- Overlay compact technical metadata: format, dimensions, voxel spacing and
+  units, datatype, frame count, file size, orientation, and physical field of
+  view. Do not expose free-text description or patient-adjacent fields.
+- For 4D data, load frame zero only and report the total frame count. Do not
+  animate or provide a time control in v1.
+- Show meshes and streamlines in a fitted 3D render view.
+- Use concise in-preview fallbacks for malformed, inaccessible, unsupported,
+  oversized, or graphics-incompatible files. Never leave a blank canvas.
+- Remain fully offline. Do not add a network entitlement to the extension.
+- Register only the file types required by the extension. Do not add the main
+  app to Finder's **Open With** list.
+- Preserve the existing iOS/Catalyst 16.4 deployment floor and build for both
+  Apple Silicon and Intel Macs.
+- Defer a Finder Thumbnail Extension until after the preview extension ships.
+
+## Transport decision
+
+Build the scoped file transport in the host app before the Quick Look extension.
+The app's base64 import path is a known memory and latency problem; making Quick
+Look the first consumer would leave that blocker in the shipped app while a new
+feature is being developed. The host now owns the first implementation: an opaque
+same-origin route, security-scoped access, bounded native reads, cancellation, and
+request/session generations.
+
+Quick Look should reuse and factor that transport when its extension target is
+added. The extension still needs its own lifecycle and sandbox policy, but it
+should not introduce a second file-delivery design or revive a base64 bridge.
+
+Apple references:
+
+- [Quick Look overview](https://developer.apple.com/documentation/quicklook/)
+- [QLPreviewingController](https://developer.apple.com/documentation/quicklook/qlpreviewingcontroller)
+- [Preparing a file preview](https://developer.apple.com/documentation/quicklookui/qlpreviewingcontroller/preparepreviewoffile%28at%3Acompletionhandler%3A%29)
+- [Data-based previews](https://developer.apple.com/documentation/quicklookui/qlpreviewprovider)
+
+## Risks and open questions
+
+Added after a feasibility review of the plan against the codebase. Everything the
+plan assumes about APIs checked out (see *Verified assumptions* below); these are
+the things that did not, or that the plan sequences in a way I would change.
+
+### R1 — The largest technical unknown is proved far too late (blocking)
+
+Nothing in Milestones 0–3 proves that **NiiVue can render at all inside a Quick Look
+extension process**. A preview extension is a separate, heavily sandboxed,
+memory-capped process; WebGL/WebGPU availability and GPU-process access inside it
+are not guaranteed and are not documented either way. Milestone 2's exit gate — "a
+deterministic synthetic success state" — can be satisfied by DOM-only content and
+would not catch this.
+
+If WebGL does not work there, Milestones 2–7 are wasted work and the product
+contract itself has to change (e.g. render server-side to a static image, or drop
+the feature). This must be settled first. See the new **Milestone 0.5**.
+
+### R2 — Memory headroom may be the real constraint (blocking, coupled to R1)
+
+Measured on the existing app with the 4 MB demo volume: **~247 MB resident in the
+WebKit content process** and ~234 MB in the app process. Most of that is baseline —
+the JS bundle, NiiVue's WebGL textures and gradient volumes — not image data.
+
+Quick Look extensions run under materially tighter jetsam limits than an app. If
+NiiVue's *baseline* WebKit footprint approaches the extension's budget before any
+file is loaded, the resource policy in Milestone 7 is not tuning, it is a
+feasibility question. Measure it in Milestone 0.5, not Milestone 7.
+
+### R3 — Extension discovery may be untestable on this machine (blocking for local QA)
+
+Finder discovers Quick Look extensions through Launch Services and runs them via
+`pluginkit`. This machine has **no Apple Development certificate** — only a
+`Developer ID Application` cert, which does not sign development builds — so the
+Catalyst app is currently built ad-hoc (`CODE_SIGN_IDENTITY="-"`) from a
+`DerivedData` path. Whether Finder will register and invoke an extension embedded
+in such a bundle is unverified, and the plan does not mention signing at all.
+
+Resolve before Milestone 1: either confirm ad-hoc + `lsregister` is sufficient, or
+obtain a development certificate (Xcode → Settings → Accounts). If neither works,
+every Finder-facing exit gate in this plan is unrunnable.
+
+### R4 — Fixture coverage is thinner than Milestone 0 implies
+
+The nearest fixture source is `/Users/chris/src/mono/packages/dev-images`, which is
+a **private, Git-LFS** package explicitly "not published to npm" — so
+redistribution needs a decision, not just selection. Actual coverage against the v1
+matrix:
+
+| Format | Fixtures available | Note |
+| --- | --- | --- |
+| `.nii` / `.nii.gz` | 30 | ample |
+| `.mgz` | 3 | ample |
+| `.mz3` | 8 | ample |
+| `.tck` / `.trk` / `.trx` | 1 / 1 / 3 | sufficient |
+| `.mgh` | **0** | derive from `.mgz` (plan already anticipates this) |
+| `.nrrd` | **0** | none anywhere in the monorepo |
+| `.mha` | **0** | none |
+| `.mhd` | **0** | none — and this is the Milestone 6 gate |
+| `.gii` | **0** | none |
+
+Five of the eight v1 families have no fixture, and four of those have no obvious
+source. That is a real Milestone 0 lift on the critical path for Milestones 4–6.
+Either budget for authoring/converting them, or narrow the v1 matrix to the
+formats we can actually test.
+
+### R5 — The extension must not break the iOS targets
+
+The project builds for iOS device, iOS Simulator, and Mac Catalyst. A Quick Look
+preview extension is Catalyst/macOS-only. Adding the target must not appear in the
+iOS destinations or break `xcodebuild -destination 'generic/platform=iOS'`. Set
+`SUPPORTED_PLATFORMS` on the extension target explicitly and keep the existing iOS
+builds in the Milestone 1 exit gate, not only in Milestone 8.
+
+### R6 — "Both Apple Silicon and Intel" is stated but not testable here
+
+The project sets no explicit `ARCHS` (so Release uses `ARCHS_STANDARD`) and
+`ONLY_ACTIVE_ARCH = YES` for Debug. Building universal is achievable; **verifying**
+Intel is not — this is an Apple Silicon machine, and Intel Mac support is being
+wound down across recent macOS releases. Either drop the Intel claim to
+"builds universal, verified on Apple Silicon only", or identify a test machine.
+
+### Ambiguities to settle before starting
+
+1. **"Meaningful content within two seconds" — measured from when?** Finder
+   invocation, `preparePreviewOfFile` entry, or first byte delivered? These differ
+   by the extension launch cost, which we do not control. Propose: from
+   `preparePreviewOfFile` entry to the `loaded` message, reported separately from
+   cold-start extension launch.
+2. **"Neurological orientation"** maps to `isRadiological = false` in NiiVue. Say so
+   explicitly — the host app exposes this as a user toggle and the mapping is not
+   self-evident.
+3. **The shared web-build target does change the existing app.** Milestone 0 says
+   not to mix this work with unrelated fixes, but the `NiiVueWeb` aggregate target
+   in "Build organization" necessarily rewrites the app's existing script phase.
+   That is fine — but call it out as deliberate shared-infrastructure work rather
+   than letting it look like scope leakage.
+4. **The working tree must be landed first.** There are currently ~15 uncommitted
+   files from the audit rounds. Milestone 0's "distinct reviewable changeset"
+   requires committing or shelving those before the first Quick Look commit.
+5. **`.trx` is a zip container.** Confirm the reader's I/O shape is compatible with
+   the bounded-chunk scheme transport before Milestone 5, rather than discovering a
+   whole-file requirement late.
+
+### Verified assumptions (checked, no action needed)
+
+- `QLPreviewingController` **is** available to Mac Catalyst —
+  `MacOSX.sdk/System/iOSSupport/.../QuickLook.framework/Headers/QLPreviewingController.h`.
+- NiiVue `1.0.0-rc.11` has readers for every v1 format: `nii`, `mgh`/`mgz`,
+  `nrrd`/`nhdr`, `mha`/`mhd`, `mif`/`mih`, AFNI `head`, `gii`, `mz3`, and tract
+  readers `tck`, `trk`, `trx`, `tt`.
+- The APIs the plan depends on exist: `limitFrames4D` and `urlImageData` on
+  `ImageFromUrlOptions`, and `customLayout` for the fixed 2×2 grid.
+- The extension bundle identifier convention (`com.niivue.mobile.QuickLookPreview`
+  under host `com.niivue.mobile`) is correct.
+
+## v1 format boundary
+
+| Family | Extensions | v1 behavior | Notes |
+| --- | --- | --- | --- |
+| NIfTI | `.nii`, `.nii.gz` | MPR + Render | Frame zero only for 4D; compound-extension UTI routing is a release gate. |
+| MGH | `.mgh`, `.mgz` | MPR + Render | Generate a small `.mgh` fixture from a licensed `.mgz` fixture if needed. |
+| NRRD | `.nrrd` | MPR + Render | Self-contained NRRD only; detached `.nhdr` is out of scope. |
+| MetaImage | `.mha` | MPR + Render | Self-contained files are required. |
+| MetaImage detached | `.mhd` | MPR + Render if its single sibling payload is accessible; otherwise metadata fallback | Full support is controlled by the Milestone 6 feasibility gate. |
+| GIFTI | `.gii` | 3D render for geometry; metadata fallback for layer-only files | Do not search the filesystem for a companion surface. |
+| MZ3 | `.mz3` | 3D render | Use NiiVue's native mesh reader. |
+| Streamlines | `.tck`, `.trk`, `.trx` | 3D render | Use NiiVue's mesh/tract loader and default directional coloring. |
+
+Deferred formats:
+
+- FreeSurfer meshes (`.white`, `.pial`, `.inflated`, `.sphere`, `.orig`,
+  `.smoothwm`, `.qsphere`): reader support exists, but the generic extensions
+  and file-association risk need a separate release decision.
+- AFNI `.niml.tract`: no reader or fixture exists in the current NiiVue source;
+  implement this upstream before adding it to Quick Look.
+- OBJ, STL, and PLY: NiiVue can read them, but Finder and specialist mesh apps
+  are better owners of these common types.
+- CIFTI, spectroscopy NIfTI, complex data, and vector NIfTI: allow NiiVue's
+  best-effort load, then show technical metadata fallback if the result is not
+  an ordinary displayable voxel volume.
+
+## Architecture
+
+```text
+Finder
+  -> Quick Look Preview Extension
+      -> PreviewViewController
+          -> scoped custom-scheme file server
+          -> bundled quicklook.html in WKWebView
+              -> NiiVue volume or mesh loader
+              -> ready / metadata / error message
+          -> complete the Quick Look request exactly once
+```
+
+### Native extension
+
+- `PreviewViewController` owns one `WKWebView`, conforms to
+  `QLPreviewingController`, and coordinates one generation token per requested
+  file.
+- A preview-specific `WKURLSchemeHandler` serves only:
+  - bundled web assets below the extension's known resource root;
+  - the exact requested document URL;
+  - one explicitly approved same-directory `.mhd` sidecar.
+- Validate scheme, host, token, and path components. Do not use string-prefix
+  containment checks, private WebKit preferences, broad directory access, or
+  interpolated JavaScript.
+- Read file payloads asynchronously in bounded chunks. Close the file as soon
+  as delivery finishes; Apple advises against holding descriptors open for the
+  lifetime of a preview.
+- `preparePreviewOfFile` starts work without blocking the main thread. Its
+  completion handler fires once after either useful content or the fallback
+  view is ready.
+- Teardown invalidates the generation token, stops scheme tasks, closes file
+  handles, stops WebKit loading, and destroys the NiiVue instance.
+
+### Web preview
+
+- Add a dedicated `quicklook.html` and TypeScript entry point. It should use
+  NiiVue directly rather than adding another React tree.
+- Extract only the NiiVue construction options that genuinely need to be
+  shared with the app. Avoid a broad app refactor.
+- The native side passes a small structured request containing the scoped URL,
+  display name, format family, file size, and optional sidecar URL.
+- Volume requests call `loadVolumes` with `limitFrames4D: 1` and apply the fixed
+  four-quadrant custom layout.
+- Mesh and tract requests call `loadMeshes`, switch to render mode, and fit the
+  camera after loading.
+- The page posts typed `ready`, `loaded`, and `failed` messages. `loaded`
+  includes sanitized header metadata needed by the overlay.
+- A `ResizeObserver` keeps the canvas sharp as Finder resizes the preview.
+- Use a near-black canvas and an adaptive, high-contrast metadata strip. The
+  narrow layout may abbreviate labels but must not hide values.
+
+### Build organization
+
+- Add one deterministic web-build script used by both the app and extension.
+- Prefer a small aggregate `NiiVueWeb` target with an explicit output stamp;
+  make the app and preview extension depend on it. This avoids two targets
+  racing to rebuild the same ignored `dist/` directory.
+- Build the existing app entry and the new Quick Look entry from one Vite
+  multi-page build so NiiVue code can be shared between chunks.
+- Use the lockfile on clean installs, validate the supported Node version, and
+  keep runtime bundles free of remote URLs.
+- Test the pinned NiiVue `1.0.0-rc.11` first. Upgrade only if a v1 format or
+  lifecycle requirement fails; pin the replacement exactly and record why.
+
+## Milestones
+
+### Milestone 0 — baseline and fixtures
+
+Deliverables:
+
+- Land or shelve the ~15 uncommitted files from the audit rounds first, so Quick
+  Look work starts from a clean tree and is reviewable on its own.
+- Start Quick Look work as a distinct reviewable changeset; do not mix it with
+  unrelated audit fixes. (The shared web-build target in "Build organization" is
+  the one deliberate exception — it necessarily touches the app.)
+- Record passing baseline checks for the React build and existing iOS/Catalyst
+  app.
+- Create a fixture manifest with source path, format, size, license, and hash.
+- Select the smallest useful licensed examples for each v1 format. Derive
+  compact uncompressed `.nii`/`.mgh` and detached `.mhd` fixtures from licensed
+  compressed/self-contained samples where practical.
+- Include malformed and truncated fixtures without clinical or identifying
+  metadata.
+
+Exit gate:
+
+- Every v1 extension has a redistributable fixture or a documented deterministic
+  fixture-generation step.
+- Existing app behavior and build results are captured before target changes.
+
+### Milestone 0.5 — feasibility spike (kill gate)
+
+Throwaway code. The point is to answer three questions before any real
+implementation exists, because a "no" on any of them changes the product.
+
+Deliverables:
+
+- A minimal Quick Look preview extension embedded in the Catalyst app that loads a
+  bundled HTML page in a `WKWebView` and is invoked by Finder for one hardcoded
+  test extension. No scheme handler, no transport, no metadata, no fallbacks.
+- The page reports, via a message handler: whether a WebGL2 context was obtained,
+  the renderer string, and whether a bundled NiiVue instance rendered one bundled
+  volume to a non-blank canvas.
+- Resident memory of the extension and its WebKit content process, at rest and with
+  that volume loaded.
+- A note on how the extension was signed and registered, and whether Finder found
+  it without manual `lsregister` intervention.
+
+Exit gate and decision rule:
+
+- **WebGL2 available and NiiVue renders inside the extension** → proceed to
+  Milestone 1 as written.
+- **Renders, but memory is near the extension's limit with a small volume** →
+  proceed, but re-open the product contract first: the resource budgets in
+  Milestone 7 become entry criteria, and the v1 format matrix may need to shrink.
+- **No WebGL, or Finder will not invoke the extension on this machine** → stop.
+  Do not build Milestones 2+. Escalate with the measurements; the options are a
+  non-WebGL rendering path, a static-image preview, or dropping the feature.
+
+Nothing from this milestone is intended to survive into the shipped extension.
+
+### Milestone 1 — extension target and UTI routing spike
+
+Deliverables:
+
+- Add the embedded Quick Look Preview Extension target and shared scheme.
+- Use a distinct bundle identifier such as
+  `com.niivue.mobile.QuickLookPreview`.
+- Set extension-safe APIs only, Catalyst support, the existing deployment floor,
+  and universal Mac architectures.
+- Give the extension the app sandbox and only file-read access demonstrated as
+  necessary. Do not copy the host app's network entitlement.
+- Define exact UTTypes and `QLSupportedContentTypes` entries for the v1 matrix.
+  Do not add host-app document roles.
+- Probe each fixture with Launch Services/Finder on a clean install. Reuse a
+  stable system UTI where one exists; otherwise define a namespaced type with
+  the exact filename-extension tag.
+- Specifically prove that `.nii.gz` selects this extension without claiming
+  every generic gzip archive. Never register the extension for `public.gzip` as
+  a workaround.
+
+Exit gate:
+
+- Finder discovers and invokes the extension for every advertised v1 type.
+- Unrelated `.gz`, deferred FreeSurfer extensions, and common mesh files are not
+  intercepted.
+- The existing iOS device, iOS Simulator, and Mac Catalyst builds all still
+  succeed. The extension target must not join the iOS destinations.
+- `.nii.gz` compound-extension routing works after clearing the Quick Look cache
+  and reinstalling the containing app. Failure blocks the release and triggers
+  a narrowly scoped UTI redesign.
+
+### Milestone 2 — minimal preview shell and shared web build
+
+Deliverables:
+
+- Add the deterministic shared web-build target/script.
+- Add `quicklook.html`, its TypeScript entry, canvas styling, loading state,
+  metadata strip, and fallback panel.
+- Add `PreviewViewController` with a bundled-page load and typed message
+  handlers.
+- Complete a synthetic preview request without touching document bytes.
+- Make the page responsive from Finder's minimum practical preview size through
+  a large resizable window.
+
+Exit gate:
+
+- A clean app build embeds the extension and both web entries.
+- Spacebar Quick Look shows the branded loading shell and then a deterministic
+  synthetic success state without launching the containing app.
+- The build and runtime perform no network access.
+
+### Milestone 3 — scoped file transport and lifecycle
+
+Deliverables:
+
+- Factor the host app's bounded-chunk scheme transport into the preview target and
+  retain an opaque per-request document token per extension instance.
+- Stream the selected file without base64, JavaScript source interpolation, or
+  a second full native copy.
+- Honor `WKURLSchemeTask.stop`, request replacement, view disappearance, and
+  controller deinitialization.
+- Add a single completion gate and readiness timeout so stale JavaScript or file
+  callbacks cannot complete a newer preview.
+- Add structured error codes for unreadable file, unsupported type, timeout,
+  graphics failure, cancellation, and resource limit.
+
+Exit gate:
+
+- A selected fixture reaches JavaScript with byte count and filename intact.
+- Cancelling during asset load and during document load closes resources and
+  produces no late state mutation.
+- Repeating open/dismiss cycles does not retain old controllers, scheme tasks,
+  files, or WebViews.
+
+### Milestone 4 — voxel previews and metadata
+
+Deliverables:
+
+- Implement NIfTI, MGH/MGZ, NRRD, and MHA classification and loading.
+- Load only frame zero for 4D data while retaining the total frame count in
+  metadata.
+- Apply the fixed equal-size 2×2 layout:
+  Axial, Coronal, Sagittal, Render.
+- Center the crosshair, use neurological orientation (`isRadiological = false`),
+  and keep orientation labels visible.
+- Format dimensions, spacing/units, datatype, frame count, file size,
+  orientation, and physical field of view without free-text header fields.
+- Route nonstandard NIfTI that cannot produce the ordinary voxel view to the
+  metadata fallback.
+
+Exit gate:
+
+- Each core voxel fixture produces four nonblank tiles and correct sanitized
+  metadata.
+- A 4D fixture reports its frame count while retaining only frame zero.
+- Corrupt, truncated, zero-dimension, and unsupported-datatype fixtures produce
+  the fallback panel rather than a blank view or extension crash.
+
+### Milestone 5 — mesh and streamline previews
+
+Deliverables:
+
+- Load geometry GIFTI and MZ3 with `loadMeshes`.
+- Load TCK, TRK, and TRX through NiiVue's tract readers.
+- Select render-only mode, fit the camera, and enable orbit/zoom interaction.
+- Preserve NiiVue's default directional tract coloring and useful embedded mesh
+  colors.
+- Detect a GIFTI file that supplies only labels/scalars and show metadata rather
+  than searching for a companion surface.
+
+Exit gate:
+
+- Every mesh/tract fixture is visible, centered, and interactively rotatable.
+- Resizing does not crop or blur the render.
+- Layer-only and malformed GIFTI files produce an accurate fallback.
+
+### Milestone 6 — detached MHD feasibility gate
+
+Deliverables:
+
+- Parse only a bounded header prefix to resolve one `ElementDataFile` sibling.
+- Accept a plain same-directory filename only. Reject URLs, absolute paths,
+  traversal, wildcard/list forms, and nested paths.
+- Attempt security-scoped access to that exact sibling, expose it through a
+  second opaque scheme URL, and pass it as NiiVue's `urlImageData`.
+- Test local, iCloud-downloaded, and external-volume files.
+
+Exit gate and decision rule:
+
+- If Finder grants reliable sibling access without broad entitlements, ship a
+  rendered `.mhd` preview.
+- Otherwise keep `.mhd` as an explicit metadata preview that names the required
+  sidecar and access limitation. Do not broaden sandbox access or copy an
+  arbitrary directory to force full rendering.
+
+### Milestone 7 — resource policy and failure UX
+
+Deliverables:
+
+- Profile representative small and moderate files before selecting limits.
+- Establish conservative file, decoded-voxel, mesh-vertex/index, tract-point,
+  and timeout budgets from measured headroom. Unknown metadata fails to the
+  fallback rather than bypassing a limit.
+- Ensure all heavy parsing/loading is asynchronous from the preview-controller
+  callback.
+- Surface initialization failures from NiiVue/WebGL to the native fallback.
+- Keep technical errors concise; do not show full filesystem paths.
+- Add accessibility labels for filename, format, metadata, loading, and errors.
+
+Exit gate:
+
+- A representative small preview becomes meaningful within two seconds on
+  Apple Silicon, measured from `preparePreviewOfFile` entry to the `loaded`
+  message. Report cold extension-launch cost separately — it is not ours to fix.
+- Dismissal during a large load returns promptly and releases resources.
+- Twenty sequential previews return near baseline memory after dismissal;
+  investigate any monotonic growth.
+- Oversized and deliberately hostile headers are rejected before large
+  allocations.
+
+### Milestone 8 — system verification and release
+
+Deliverables:
+
+- Run format-by-format Finder tests on Apple Silicon and Intel macOS where
+  available.
+- Cover uppercase extensions, compound extensions, Unicode filenames, spaces,
+  long names, read-only files, iCloud-downloaded files, and malformed inputs.
+- Verify standard Finder behavior: Space opens/closes, Escape dismisses, window
+  resizing works, and extension gestures do not interfere with Quick Look.
+- Verify extension discovery after clean install, app replacement, cache reset,
+  and reboot/login where practical.
+- Re-run the existing app's React checks and iOS/Catalyst builds. A NiiVue
+  dependency update also requires the app's volume, drawing, and corrupt-file
+  regression checks.
+- Document supported formats, frame-zero behavior, metadata-only fallbacks,
+  resource limits, extension troubleshooting, and the deferred list.
+
+Exit gate:
+
+- All advertised types route to the extension and meet their rendered or
+  documented fallback contract.
+- The host app does not launch, gain new document roles, or regress.
+- No private API, network dependency, broad file entitlement, base64 document
+  transport, blank failure state, stale completion, or retained file descriptor
+  remains.
+
+## Verification matrix
+
+| Area | Required evidence |
+| --- | --- |
+| Build | Clean React build; clean app, extension, iOS, and Catalyst builds; universal Mac architectures. |
+| Routing | Finder invocation for every advertised UTI; explicit negative tests for generic gzip and deferred formats. |
+| Voxels | Nonblank four-tile output and exact sanitized header metadata for each core format. |
+| Geometry | Visible, fitted, resizable, interactive mesh/tract render for each core format. |
+| Failures | Malformed, inaccessible, unsupported, oversized, missing-sidecar, timeout, and graphics-failure fallbacks. |
+| Lifecycle | Rapid file changes, cancellation during load, twenty open/dismiss cycles, and no stale callbacks. |
+| Security | Offline runtime, exact-file scheme routes, traversal rejection, no private WebKit keys, no leaked paths or PHI. |
+| Performance | ≤2 seconds from `preparePreviewOfFile` to `loaded` for the representative small fixture; extension launch cost reported separately; measured limits for larger content. |
+
+## Explicitly deferred follow-up
+
+After v1 ships, evaluate these as separate changesets:
+
+1. Finder Thumbnail Extension using static, resource-bounded snapshots.
+2. FreeSurfer mesh UTIs and collision testing.
+3. An upstream NiiVue reader plus licensed fixture for AFNI `.niml.tract`.
+4. OBJ/STL/PLY registration only if NiiVue adds value beyond existing viewers.
+5. iOS/iPadOS Files previews.
+6. Host-app **Open With** document roles.
