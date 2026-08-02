@@ -604,6 +604,19 @@ the headless suite cannot see the panel:
 - **Known gap:** `.gii.gz` is declined — it resolves to generic gzip and the
   NIfTI sniff correctly rejects it. Teaching the sniff to recognise GIFTI XML is
   possible but is exactly what the obligation above forbids without a decision.
+- **The app declares no `CFBundleDocumentTypes`, deliberately.** The action
+  button in the Quick Look panel ("Open with X", or a verb like "Uncompress")
+  is Finder's, and shows the **default role handler** for the file's type — it
+  has nothing to do with this extension. Adding Viewer roles to put NiiVue there
+  was considered and declined (owner, 2026-08-02): it reverses the contract line
+  about not becoming a general file handler, it would not change the button
+  while other apps hold those defaults (on the dev machine MRIcroGL, MRIcro,
+  Surfice and workbench do), and `.nii.gz` could never be changed at all — its
+  type *is* `org.gnu.gnu-zip-archive`, so the button can only say NiiVue if
+  NiiVue becomes the default opener for **every gzip on the machine**. A Quick
+  Look claim is invisible when we decline; a document-type claim would not be.
+  (Note: an "Open with NiiVue medical image viewer" button on `.mz3` is a NiiVue
+  *Chrome PWA*, not this app.)
 - `files.user-selected.read-only` is **kept**: the narrowest file entitlement
   available, matching Apple's own template, and it grants nothing absent a user
   selection the extension never performs. Removing it is a plausible tightening

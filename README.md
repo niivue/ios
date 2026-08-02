@@ -242,6 +242,11 @@ therefore reaches this extension, which reads the gzip header, checks whether
 the payload is a NIfTI, and returns an error for anything else so that Finder
 falls back to another preview provider.
 
+This is also why the Quick Look panel's action button reads **"Uncompress"** for
+a `.nii.gz` rather than offering to open it: that button shows whichever app
+owns the file's type, and a `.nii.gz` genuinely *is* a gzip archive as far as
+macOS is concerned. The preview itself is unaffected.
+
 Note that error-driven fallback is not documented behaviour: Apple specifies the
 completion handler as the signal that the view is ready, not as a way to decline
 in favour of another provider. Returning an error is what the two comparable
