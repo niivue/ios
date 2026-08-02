@@ -651,6 +651,15 @@ are still escaped, which is what that encoding was actually protecting against.
 page is solid black and has no SwiftUI background to reveal. This is a rendering
 hint, not the window-drag fix.
 
+**Every async channel into `PreviewViewController` is generation-scoped**,
+including script messages — a terminal `loaded`/`failed` echoes the generation it
+was issued under and is dropped if the host has moved on. `ready` is exempt by
+design: it is posted before the page knows its generation, and only triggers a
+dispatch that is already guarded. The page's `fail` is deliberately *wrapped*
+where it is exposed, because the host calls `fail(code, generation)` while the
+internal form takes a detail string second; exposing the internal one binds the
+generation to `detail`.
+
 **Verify which binary Finder actually ran before concluding anything.** Quick
 Look registration moves silently whenever a second copy of the app exists — an
 old `-derivedDataPath` tree, an `xcodebuild archive`, a copy in `/Applications`.

@@ -452,6 +452,27 @@ const notClaimed = await page.evaluate(() => {
   gl.dispatchEvent(event)
   return event.defaultPrevented
 })
+// Terminal messages must echo the host's generation, or a message in flight
+// across a navigation can complete the next preview. `ready` is exempt.
+{
+  // A fresh page: `fail` is a no-op once a preview has settled, which is
+  // correct and would make this check vacuous.
+  const stampPage = await openPreview()
+  const stamping = await stampPage.evaluate(async () => {
+    await window.niivuePreview.fail('timeout', 7)
+    return window.__posted.map((m) => [m.stage, m.generation ?? null])
+  })
+  const terminal = stamping.filter(([stage]) => stage !== 'ready')
+  const ready = stamping.filter(([stage]) => stage === 'ready')
+  check(
+    'terminal messages echo the host generation',
+    terminal.length === 1 && terminal[0][0] === 'failed' && terminal[0][1] === 7,
+    JSON.stringify(terminal),
+  )
+  check('and `ready` carries none, since it predates knowing it', ready.every(([, g]) => g === null), JSON.stringify(ready))
+  await stampPage.close()
+}
+
 check('the page leaves the default action alone', notClaimed === false, `defaultPrevented=${notClaimed}`)
 const selectionPaint = await page.evaluate(() => {
   const probe = document.createElement('div')

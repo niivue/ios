@@ -23,6 +23,15 @@ import {
 } from '@niivue/niivue'
 import { describeMesh, describeVolume, type VolumeSummary } from './preview-metadata'
 
+/**
+ * The request this page is answering. Echoed back on every terminal message so
+ * the host can drop one that belongs to a preview it has already moved past —
+ * script messages were the last async channel without that scoping, and a
+ * `loaded` in flight across a navigation could otherwise complete the *next*
+ * preview while it was still on its spinner.
+ */
+let generation = -1
+
 /** Native → page. One request per preview; the host never sends a second. */
 export interface PreviewRequest {
   /** Opaque same-origin route to the document. Only this page can resolve it. */
@@ -32,6 +41,8 @@ export interface PreviewRequest {
   fileSize?: number
   /** Which NiiVue loader the file needs. Classified natively, by extension. */
   family: 'volume' | 'mesh'
+  /** Host request generation, echoed back on the terminal message. */
+  generation?: number
 }
 
 /** Page → native. Exactly one terminal message (`loaded` or `failed`) per request. */
@@ -70,7 +81,7 @@ declare global {
     niivuePreview?: {
       render(request: PreviewRequest): Promise<void>
       /** Native-detected failures, shown here so the panel is never blank. */
-      fail(code: FailureCode): void
+      fail(code: FailureCode, hostGeneration?: number): void
     }
   }
 }
@@ -88,7 +99,10 @@ function post(message: HostMessage): void {
       webkit?: { messageHandlers?: { qlPreview?: { postMessage: (m: string) => void } } }
     }
   ).webkit?.messageHandlers?.qlPreview
-  handler?.postMessage(JSON.stringify(message))
+  // `ready` carries no generation: it is posted before the host has told us
+  // which request we are answering, and it only ever triggers a dispatch the
+  // host already guards.
+  handler?.postMessage(JSON.stringify(message.stage === 'ready' ? message : { ...message, generation }))
 }
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
@@ -218,7 +232,8 @@ let nv: NiiVue | undefined
  * `PreviewSchemeHandler` returns out of its read loop. An `AbortController` on
  * this side would only look like cancellation.
  */
-function fail(code: FailureCode, detail?: string): void {
+function fail(code: FailureCode, detail?: string, hostGeneration?: number): void {
+  if (hostGeneration !== undefined) generation = hostGeneration
   if (settled) return
   settled = true
   showFallback(failureText[code])
@@ -280,6 +295,7 @@ async function renderMesh(instance: NiiVue, request: PreviewRequest): Promise<vo
 }
 
 async function render(request: PreviewRequest): Promise<void> {
+  if (request.generation !== undefined) generation = request.generation
   if (!nv) {
     fail('graphics-unavailable')
     return
@@ -383,7 +399,15 @@ function present(
 
 // Installed before NiiVue is constructed so the host can always reach `fail`,
 // including when the graphics context is what failed.
-window.niivuePreview = { render, fail }
+//
+// `fail` is wrapped rather than exposed directly: the host calls it as
+// `fail(code, generation)`, while the internal form takes an optional detail
+// string second. Exposing the internal one would silently bind the generation
+// to `detail` — the type checker caught exactly that.
+window.niivuePreview = {
+  render,
+  fail: (code: FailureCode, hostGeneration?: number) => fail(code, undefined, hostGeneration),
+}
 
 async function main(): Promise<void> {
   try {

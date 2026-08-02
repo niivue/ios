@@ -1059,6 +1059,19 @@ audit agent runs — can steal the registration. That is how it drifted three
 times. Re-run `install-quicklook.sh --no-build` immediately before observing
 Finder.
 
+## Audit round 8 — external review (2026-08-02)
+
+An independent review, mostly corroborating. Four actionable points, all fixed:
+the decline and content-process-termination paths held the security scope and
+document token rather than tearing down; script messages became
+generation-scoped, closing the last unguarded async channel; and a byte-order
+expression that was really just `byteSwapped` was simplified.
+
+Wiring the generation through surfaced a genuine bug the type checker caught:
+the host calls `fail(code, generation)` while the page's internal `fail` takes a
+detail string second, so exposing it directly bound the generation to `detail`.
+It is wrapped at the boundary now.
+
 ## Regression coverage added for Milestones 3–5, 7
 
 `NiiVue/React/tests/preview-regression.mjs`, run with `npm run test:preview`.

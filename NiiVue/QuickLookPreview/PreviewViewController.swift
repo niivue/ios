@@ -367,6 +367,10 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
             finish(NSError(domain: "com.niivue.mobile.QuickLookPreview", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Not a NIfTI volume.",
             ]))
+            // Release now rather than at the next preview. Arrowing through a
+            // folder of foreign archives would otherwise hold each file's
+            // security scope for as long as its declined panel is up.
+            teardown(reason: .cancelled)
             return
         }
 
@@ -437,6 +441,17 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let stage = payload["stage"] as? String else { return }
 
+        // Terminal messages carry the generation they were issued under. This
+        // was the last async channel without that scoping: a `loaded` still in
+        // flight across a navigation would otherwise complete the *next*
+        // preview while it sat on its spinner. `ready` is exempt — it is posted
+        // before the page knows its generation, and only triggers a dispatch
+        // that is already guarded.
+        if stage != "ready", let stamped = payload["generation"] as? Int, stamped != generation {
+            log.notice("dropping stale \(stage, privacy: .public) from generation \(stamped)")
+            return
+        }
+
         switch stage {
         case "ready":
             pageIsReady = true
@@ -469,7 +484,8 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     private func dispatchRequest() {
         let current = generation
         if let failure = pendingFailure {
-            call("await window.niivuePreview.fail(code);", ["code": failure.rawValue])
+            call("await window.niivuePreview.fail(code, generation);",
+                 ["code": failure.rawValue, "generation": current])
             // Same backstop as the load path. This branch used to return before
             // arming any timer, and the readiness timer has already stood down
             // by now, so a page that ran `fail()` but could not post left the
@@ -483,6 +499,7 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
             "displayName": request.displayName,
             "fileSize": request.fileSize,
             "family": request.family,
+            "generation": current,
         ]
         guard let json = try? JSONSerialization.data(withJSONObject: payload),
               let text = String(data: json, encoding: .utf8) else {
@@ -498,7 +515,8 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
             guard let self, self.generation == current, self.completion != nil else { return }
             // The shell is up, so the page can explain this itself.
             log.error("document load timed out")
-            self.call("await window.niivuePreview.fail(code);", ["code": PreviewFailure.timeout.rawValue])
+            self.call("await window.niivuePreview.fail(code, generation);",
+                      ["code": PreviewFailure.timeout.rawValue, "generation": current])
             // Asking the page to explain itself only works if the page is
             // alive. A hung or jetsammed content process will never run that
             // call and never post `failed`, which left the completion pending
@@ -563,5 +581,9 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         // This is where a resource-limit kill lands. The web view is blank, so
         // the only honest answer to Quick Look is an error.
         finish(Self.failed("The preview ran out of resources."))
+        // Nothing survives the content process, so hold nothing for it: the
+        // document token and the security scope would otherwise stay live until
+        // the next preview.
+        teardown(reason: .cancelled)
     }
 }

@@ -222,7 +222,12 @@ enum VolumeSniff {
             return expected.contains(text)
         }
         guard let big = int32(at: 0) else { return false }
-        let little = Int32(bigEndian: big.bigEndian).byteSwapped
+        // `int32(at:)` accumulates big-endian, so the little-endian reading is
+        // just the byte swap. (This was written as
+        // `Int32(bigEndian: big.bigEndian).byteSwapped`, which is the same value
+        // on either host endianness — the two conversions cancel — but reads as
+        // though it were doing something subtler.)
+        let little = big.byteSwapped
 
         // NIfTI-1: sizeof_hdr 348, magic "n+1" (single file) or "ni1" (paired) at 344.
         if (big == 348 || little == 348) && magic(at: 344, ["n+1", "ni1"]) { return true }
