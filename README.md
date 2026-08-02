@@ -252,6 +252,32 @@ clean install with a competing archive previewer installed. If it turns out that
 a `.gz` loses its normal preview, the honest options are to document the
 takeover or to drop `.nii.gz` support — not to leave this paragraph as it is.
 
+#### Turning the preview off
+
+Quick Look extensions are managed by macOS, not by this app:
+
+**System Settings → General → Login Items & Extensions → Quick Look**
+
+Untick NiiVue there and the extension is no longer launched at all — `.nii.gz`
+and every other `.gz` fall straight through to whatever previewed them before.
+That is a stronger off switch than an in-app setting could be, which is why
+there isn't one: an app cannot set its own extension's state, so a checkbox here
+could only make the extension start up and then decline.
+
+The same thing from a script, for a managed or scripted setup:
+
+```sh
+pluginkit -e ignore  -i com.niivue.mobile.QuickLookPreview   # off
+pluginkit -e use     -i com.niivue.mobile.QuickLookPreview   # on
+pluginkit -e default -i com.niivue.mobile.QuickLookPreview   # back to default (on)
+
+# What is registered, and its current state:
+#   "+" enabled by an explicit choice, "-" disabled, blank means default
+pluginkit -m -v -i com.niivue.mobile.QuickLookPreview
+```
+
+Deleting the app removes the extension with it.
+
 #### Troubleshooting
 
 If pressing Space shows nothing, or the old previewer:

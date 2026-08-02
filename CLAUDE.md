@@ -583,6 +583,17 @@ simulator apps, which silently enables the deferred iOS Files preview surface
 and its broad gzip claim. Verify with `ls NiiVue.app/PlugIns` on an iOS build:
 the directory must not exist.
 
+**There is deliberately no in-app switch for the Quick Look extension.** macOS
+owns that (System Settings → General → Login Items & Extensions → Quick Look,
+i.e. PlugInKit user election; `pluginkit -e use|ignore|default -i <id>`), and
+**no public API lets an app set its own extension's election**. An in-app
+checkbox could therefore only make the extension launch and then decline, which
+is strictly worse than the system toggle — a disabled extension is never spawned,
+so the broad `.gz` claim stops applying entirely. Owner decision 2026-08-02:
+document it in `README.md`, build nothing. If a switch is ever wanted, the one
+worth building is "preview generic `.gz`" (needs an App Group shared preference),
+because that is the thing System Settings cannot express.
+
 **`GzipPeek.inflatedSize` has three traps that were each a live bypass.** A
 genuine decoder stall is *no output **and** no input consumed* — testing output
 alone let 64 KiB of `Z_SYNC_FLUSH` markers wave a 1 GiB bomb through at the
