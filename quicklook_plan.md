@@ -882,6 +882,10 @@ consumes the gesture, and the host never sees it as a window drag. Suppressing
 the selection — `user-select: none`, and later `preventDefault` — removed the
 absorber and handed the drag straight to the host.
 
+**Confirmed by observation 2026-08-02**: with `user-select: none` genuinely
+removed from the shipped page, a left drag moves the crosshair and rotates the
+render, and the window stays put. The Milestone 5 exit gate holds in full.
+
 The cure therefore must **not** stop the selection happening. It has to leave it
 in place and stop it being *painted*:
 
@@ -915,15 +919,13 @@ nothing in the workflow surfaced it. Two things now do:
 
 Use both before concluding anything about a Finder-observable behaviour.
 
-### If the recognizer does not work either
+### Not needed: the AppKit escalation
 
-The remaining option is a **native AppKit `QLPreviewingController` target**
-instead of a Catalyst one, where `NSView.mouseDownCanMoveWindow` can be
-overridden to refuse the window drag outright — the documented mechanism, and
-not reachable from UIKit. The web assets, the scheme handler and the page are
-all platform-agnostic already; only the ~200 lines of view-controller glue are
-UIKit-specific. That is the escalation, and it is a real option rather than a
-dead end.
+A native AppKit `QLPreviewingController` target, where
+`NSView.mouseDownCanMoveWindow` can be overridden, was the planned escalation.
+It is not required — the drag never has to be taken back from the host, because
+leaving WebKit's selection intact means it is never handed over. Recorded in
+case a future change re-opens the question.
 
 ## Audit round 5 — the first review of the Quick Look work (2026-08-01)
 

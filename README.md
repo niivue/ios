@@ -202,9 +202,8 @@ code path performs a network request.
 
 Volumes are drawn in **neurological orientation** with the crosshair centred and
 orientation labels visible. The panel is resizable, and the view re-renders to
-fit. The preview itself is **static** — dragging moves the Quick Look window, as
-it does over any other preview, rather than rotating the image. Open the file in
-the app for an interactive view.
+fit. Drag inside the preview to move the crosshair in the slice views or to
+rotate the 3D render; drag the panel's edges or title area to move the window.
 A compact strip along the bottom reports format, dimensions, voxel size, field
 of view, datatype, orientation and file size — all read from the header. No
 free-text or patient-adjacent header field is ever displayed.

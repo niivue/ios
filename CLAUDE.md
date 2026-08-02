@@ -660,7 +660,7 @@ clears the cache, fails if more than one is registered), and confirm with
 `log show --last 2m --predicate 'subsystem == "com.niivue.mobile.QuickLookPreview"' | grep built`
 — the extension logs its own build time on every preview.
 
-**Do NOT suppress text selection in the preview page.** WebKit starts a
+**Do NOT suppress text selection in the preview page** (confirmed by observation, 2026-08-02). WebKit starts a
 document selection on a drag NiiVue does not `preventDefault`, and that
 selection is what ABSORBS the gesture — without it the drag falls through to the
 host, which treats it as a window move. `user-select: none` and a capture-phase
@@ -668,7 +668,9 @@ host, which treats it as a window move. `user-select: none` and a capture-phase
 behaviour they appeared unrelated to. The blue tint a selection would otherwise
 paint is killed with `::selection { background: transparent }`, which leaves the
 selection intact and invisible. This cost several rounds to work out; the
-symptom and its cause look unconnected.
+symptom and its cause look unconnected. A left drag now moves the crosshair and
+rotates the render with the window staying put — verified in Finder, not
+inferred.
 
 **`attachToCanvas` replaces the canvas element** — NiiVue `cloneNode(false)`s it
 and calls `replaceChild`, so a reference taken before attaching is detached from
