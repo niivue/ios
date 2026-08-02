@@ -93,10 +93,14 @@ enum GzipPeek {
 
     /// True when the gzip member at `url` inflates to more than `limit` bytes.
     ///
-    /// The format-agnostic half of the memory policy, and the only part that
-    /// covers `.mgz`, `.nrrd.gz` and `.gii.gz` — a header budget needs a parser
-    /// per format, but every one of these is a gzip member, and a bomb is a
-    /// bomb whatever is inside it. Output is inflated into one reused buffer
+    /// The format-agnostic half of the memory policy. `.mgz` is the case that
+    /// actually depends on it: it routes by its own UTI, so `disposition` never
+    /// content-checks it, and `mgh.ts` gunzips on magic bytes before validating
+    /// anything — this gate is the only thing between it and the content
+    /// process. (`.nrrd.gz` and `.gii.gz` resolve to generic gzip and are
+    /// declined by the NIfTI sniff long before here; they would be covered too
+    /// if that ever changes.) A header budget needs a parser per format; every
+    /// one of these is a gzip member, and a bomb is a bomb whatever is inside. Output is inflated into one reused buffer
     /// and discarded; only the running total is kept, so the peak cost here is
     /// `chunkBytes`, not the payload.
     ///
@@ -107,34 +111,51 @@ enum GzipPeek {
     ///
     /// Returns false for anything that is not gzip — uncompressed files are
     /// already bounded by the source-size cap, since decoded ≈ bytes on disk.
+    ///
+    /// **Counts the FIRST member only, and that is safe by coupling, not by
+    /// design.** `gunzip`, node `zlib` and pako all decode concatenated members;
+    /// the two decoders NiiVue actually reaches do not — WebKit's
+    /// `DecompressionStream('gzip')` throws "Extra bytes past the end", and
+    /// `nifti-reader-js` uses fflate, measured to return member one alone. So a
+    /// bomb hidden in member two cannot be decoded by the preview either. If
+    /// NiiVue ever swaps decompressor, re-check this: it becomes exploitable the
+    /// day the browser side decodes more members than this does.
     static func inflatedSize(ofFileAt url: URL, exceeds limit: Int) -> Bool {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
         defer { try? handle.close() }
-        // The header can carry an arbitrarily long FNAME/FCOMMENT, so find the
-        // payload within the same bounded window the prefix reader uses.
-        guard let head = try? handle.read(upToCount: compressedBudget),
-              let offset = deflateOffset(in: head), offset < head.count else { return false }
+        guard let head = try? handle.read(upToCount: compressedBudget) else { return false }
+
+        // FAIL CLOSED when the bytes are gzip but the header will not resolve.
+        // `deflateOffset` returns nil both for "not gzip" and for "gzip whose
+        // FNAME/FCOMMENT/FEXTRA runs past the 64 KiB window", and conflating
+        // those made a single legal FEXTRA with `xlen = 65535` disable the whole
+        // check: a 1.1 MB file inflating to 1 GiB was waved through in 0.000 s.
+        let looksGzip = head.count >= 3 && [UInt8](head.prefix(3)) == [0x1f, 0x8b, 0x08]
+        guard let offset = deflateOffset(in: head), offset < head.count else { return looksGzip }
 
         var stream = compression_stream(dst_ptr: UnsafeMutablePointer<UInt8>(bitPattern: 1)!,
                                         dst_size: 0,
                                         src_ptr: UnsafePointer<UInt8>(bitPattern: 1)!,
                                         src_size: 0, state: nil)
         guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE,
-                                      COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else { return false }
+                                      COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
+            return looksGzip
+        }
         defer { compression_stream_destroy(&stream) }
 
         var produced = 0
         var output = [UInt8](repeating: 0, count: chunkBytes)
-        var input = head.subdata(in: (head.startIndex + offset)..<head.endIndex)
+        var input: Data? = head.subdata(in: (head.startIndex + offset)..<head.endIndex)
+        var status = COMPRESSION_STATUS_OK
 
-        while true {
-            var status = COMPRESSION_STATUS_OK
+        while let chunk = input {
             var stalled = false
-            let overflowed: Bool = input.withUnsafeBytes { src -> Bool in
+            let overflowed: Bool = chunk.withUnsafeBytes { src -> Bool in
                 guard let srcBase = src.bindMemory(to: UInt8.self).baseAddress else { return false }
                 stream.src_ptr = srcBase
-                stream.src_size = input.count
+                stream.src_size = chunk.count
                 repeat {
+                    let remaining = stream.src_size
                     let wrote: Int = output.withUnsafeMutableBufferPointer { dst -> Int in
                         stream.dst_ptr = dst.baseAddress!
                         stream.dst_size = dst.count
@@ -144,16 +165,36 @@ enum GzipPeek {
                     produced += wrote
                     if produced > limit { return true }
                     if status != COMPRESSION_STATUS_OK { return false }
-                    if wrote == 0 { stalled = true; return false }
+                    // A genuine stall is no output AND no input consumed. Testing
+                    // output alone was the bug: an empty stored block — the five
+                    // bytes zlib emits for Z_SYNC_FLUSH — consumes input and
+                    // emits nothing, so 64 KiB of them made this return "fine"
+                    // at the very first call, before a byte of payload was seen.
+                    if wrote == 0 && stream.src_size == remaining { stalled = true; return false }
                 } while stream.src_size > 0
                 return false
             }
             if overflowed { return true }
             if status != COMPRESSION_STATUS_OK || stalled { return false }
-            guard let next = try? handle.read(upToCount: chunkBytes), !next.isEmpty else {
-                return false // input exhausted without passing the limit
+            input = (try? handle.read(upToCount: chunkBytes)).flatMap { $0.isEmpty ? nil : $0 }
+        }
+
+        // Drain. At EOF Apple's decoder still holds up to one internal buffer of
+        // undelivered output — measured at 64 MiB, a 25% undercount against a
+        // 256 MB limit — so a file just over the line reads as just under.
+        stream.src_ptr = UnsafePointer<UInt8>(bitPattern: 1)!
+        stream.src_size = 0
+        while true {
+            let wrote: Int = output.withUnsafeMutableBufferPointer { dst -> Int in
+                stream.dst_ptr = dst.baseAddress!
+                stream.dst_size = dst.count
+                stream.src_size = 0
+                status = compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+                return dst.count - stream.dst_size
             }
-            input = next
+            produced += wrote
+            if produced > limit { return true }
+            if status != COMPRESSION_STATUS_OK || wrote == 0 { return false }
         }
     }
 
@@ -258,8 +299,11 @@ enum VolumeSniff {
         // Frames live in dim[4..6]; a 4D series multiplies the whole volume.
         var frames: Int64 = 1
         for axis in 4...6 {
+            // `continue`, not `break`: a zero or absent higher dim means "one",
+            // and stopping early understated the claim for a header with
+            // dim[4] = 0 and dim[5] = 100000, which readers treat as 100000.
             guard let dim = value(at: dimBase + axis * dimWidth, width: dimWidth, swapped: swapped),
-                  dim > 0 else { break }
+                  dim > 1 else { continue }
             let (product, overflow) = frames.multipliedReportingOverflow(by: dim)
             if overflow { return Int.max }
             frames = product

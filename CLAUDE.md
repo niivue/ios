@@ -583,6 +583,17 @@ simulator apps, which silently enables the deferred iOS Files preview surface
 and its broad gzip claim. Verify with `ls NiiVue.app/PlugIns` on an iOS build:
 the directory must not exist.
 
+**`GzipPeek.inflatedSize` has three traps that were each a live bypass.** A
+genuine decoder stall is *no output **and** no input consumed* — testing output
+alone let 64 KiB of `Z_SYNC_FLUSH` markers wave a 1 GiB bomb through at the
+first call. An unparseable gzip header must fail **closed**, because
+`deflateOffset` returns nil both for "not gzip" and for "header longer than the
+64 KiB window", and one legal `FEXTRA` with `xlen = 65535` exploited the
+conflation. And the decoder must be drained with `COMPRESSION_STREAM_FINALIZE`
+at EOF, or the total is short by up to 64 MiB — a 25% undercount. It counts the
+first member only, which is safe *only* because WebKit's `DecompressionStream`
+and fflate also stop there; re-check if NiiVue changes decompressor.
+
 **Every budget decision happens OFF the main queue.** `budgetFailure` is
 `static` and is called from the background block in `preparePreviewOfFile`, not
 from `begin`. The inflate bound streams up to the whole payload — measured at

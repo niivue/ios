@@ -918,6 +918,47 @@ it to the metadata-only panel. Teardown still does not release the NiiVue
 instance or the `WKWebView`. Script messages are still the one async channel
 without a generation stamp.
 
+## Audit round 6 — reviewing round 5's fixes (2026-08-01)
+
+The pattern held again: **six of the seven defects found were introduced by the
+previous round's fixes.** Two were critical.
+
+`GzipPeek.inflatedSize`, added in round 5 as the format-agnostic memory bound,
+had three bypasses. All were demonstrated with built fixtures against the real
+Swift, and cross-checked against WebKit:
+
+| Defect | Exploit | Effect |
+| --- | --- | --- |
+| stall test checked output only | 64 KiB of `Z_SYNC_FLUSH` markers (`00 00 00 ff ff`) | 1 GiB bomb allowed in 0.000 s, at the first call |
+| unparseable gzip header failed **open** | one legal `FEXTRA`, `xlen = 65535` | same, 1.1 MB file → 1 GiB |
+| decoder never drained at EOF | any file near the limit | undercount by 64 MiB (25%) |
+
+Fixed and re-verified across 46 adversarial fixtures: every bomb now refused,
+every legitimate file still allowed, worst case 55 ms.
+
+The other three, all from round 5:
+
+- **The inflate bound ran on the main queue**, undoing Milestone 7's "no file
+  I/O on the Quick Look callback" — 738 ms measured for a legitimate 178 MB
+  volume, blocking the readiness timer and dismissal.
+- **`didFailProvisionalNavigation` → `finish(error)`** made a benign bug harmful:
+  `stopLoading()` reports the previous navigation's cancellation asynchronously,
+  so arrowing through a folder failed each preview with the one before it.
+- **`present()` posted two terminal messages** — a `return` from a `catch` still
+  runs `finally` — corrupting the timing number the Milestone 7 gate reads.
+
+Verified sound this round: pointer lifetime and `compression_stream_destroy`
+across every exit (checked under guard-malloc), `deflateOffset`'s extraction
+byte-for-byte, `decodedSize` overflow on every extreme header, the hand-edited
+`platformFilter` across five builds including **Release archives for Catalyst
+and iOS with `-validate-for-store`**, and no constructible wall-clock DoS.
+
+Recorded, not fixed: `maxDecodedBytes` counts decoded *file* bytes, but NiiVue
+additionally allocates `Float32Array(nVox3D*3)` and `Uint8Array(nVox3D*4)`, so
+for uint8 data the content process peak is roughly **17×** what this gate
+counts. The cap is conservative in the right direction but is not calibrated to
+that multiplier — it needs the device measurement Milestone 7 still owes.
+
 ## Regression coverage added for Milestones 3–5, 7
 
 `NiiVue/React/tests/preview-regression.mjs`, run with `npm run test:preview`.
