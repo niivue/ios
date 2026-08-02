@@ -27,7 +27,10 @@
       /* Catalyst's Quick Look host also treats a primary canvas drag as a window
          drag. Let only the host handle it; sending the same sequence to NiiVue
          makes the moving coordinate space produce uncontrolled rotation. */
-      canvas { display: block; width: 100%; height: 100%; pointer-events: none; }
+      /* The canvas MUST receive pointer events — a left drag is NiiVue's
+         crosshair/rotate gesture. `pointer-events: none` gave the drag to the
+         host window instead, which made the preview inert. */
+      canvas { display: block; width: 100%; height: 100%; }
 
       /* Centred overlays share a stacking slot; only one is ever visible. */
       .overlay {

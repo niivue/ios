@@ -427,11 +427,24 @@ for (let i = 1; i <= 10; i++) {
 await page.mouse.up()
 await page.waitForTimeout(300)
 const after = (await page.locator('#gl').screenshot({ type: 'png' })).toString('base64')
-// `before === after` alone is vacuous — a blank, black or crashed canvas
-// satisfies it trivially, which is the "test shaped so it cannot fail" pattern
-// this plan calls out three times. Pair it with proof the canvas is still lit.
+// The drag must reach NiiVue and change the view. Paired with a lit-pixel
+// assertion for the same reason the inverse check needed one: "the frame
+// changed" is also satisfied by a render that collapsed into noise.
 const stillLit = (await quadrantPixels(page)).reduce((a, b) => a + b)
-check('a primary drag leaves the preview static', before === after && stillLit > 500, `${stillLit} lit px`)
+check('a primary drag rotates the render', before !== after && stillLit > 500, `${stillLit} lit px`)
+
+// And the page must claim it, or the host takes the same drag as a window move
+// on top of the rotation — which is the jitter, and half the fix.
+const claimed = await page.evaluate(() => {
+  let prevented = null
+  const probe = (e) => { prevented = e.defaultPrevented }
+  const gl = document.getElementById('gl')
+  gl.addEventListener('pointerdown', probe)
+  gl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }))
+  gl.removeEventListener('pointerdown', probe)
+  return prevented
+})
+check('and the page claims the gesture rather than the host', claimed === true, `defaultPrevented=${claimed}`)
 
 // Finder resizes the panel freely; the drawing buffer must follow, or the
 // render is upscaled and soft.

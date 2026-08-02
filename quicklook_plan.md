@@ -12,11 +12,11 @@ handler.
   `UIViewController` and `QLPreviewingController`.
 - Host a minimal offline NiiVue page in `WKWebView`. Reuse the host app's scoped
   scheme transport; do not revive a base64 file bridge.
-- **AMENDED 2026-08-01: the preview is static.** The original contract read
-  "permit viewing interactions only: resize, orbit, zoom, slice scrolling, and
-  crosshair movement". On Mac Catalyst that is not achievable — see the
-  interaction decision below. Resize still works; pointer interaction does not.
-  Drawing, saving, settings, menus and links remain excluded as before.
+- Permit viewing interactions only: resize, orbit, zoom, slice scrolling, and
+  crosshair movement. Exclude drawing, saving, settings, menus, and links.
+  (Briefly amended to "static" on 2026-08-01 and **reverted 2026-08-02** — the
+  amendment rested on a claim that four attempts had failed, and one of the four
+  had never actually been tested. See the interaction section.)
 - Show voxel data as equal-size Axial, Coronal, Sagittal, and Render quadrants.
   Use neurological orientation and an initially centered crosshair.
 - Overlay compact technical metadata: format, dimensions, voxel spacing and
@@ -858,36 +858,55 @@ real NIfTI, NRRD, MetaImage, MGH/MGZ, GIFTI, MZ3 and TCK content, and the set is
 split into `good/` and `bad/` at the owner's suggestion, each with a README
 stating its rule, so a spacebar sweep needs no lookup table.
 
-## Interaction: the preview is STATIC on Catalyst (decided 2026-08-01)
+## Interaction: left-drag, and a testing failure worth recording
 
-A primary drag over remote Catalyst content is claimed by the host as a window
-drag, cross-process, before our view sees it. Four attempts failed to take it
-back:
+A drag over remote Catalyst content is claimed by the host as a window drag
+before our view sees it. Attempts, and their **actual** evidential status:
 
-| Attempt | Result |
-| --- | --- |
-| capture-phase `preventDefault` on `pointerdown` | fixed the *selection tint* (a separate, real bug) — no effect on the window drag |
-| `webView.isOpaque = true` | no effect; kept anyway as a correct rendering hint |
-| opaque container `UIView` + full-view `UIPanGestureRecognizer` with `cancelsTouchesInView = false` | no effect |
-| `-webkit-app-region: no-drag` | no effect (Electron-only) |
+| Attempt | Tested? | Result |
+| --- | --- | --- |
+| capture-phase `preventDefault` on `pointerdown` | yes | fixed the *selection tint* — a separate, real bug. Did not stop the window drag on its own |
+| `webView.isOpaque = true` | yes | no effect on the drag; kept as a correct rendering hint |
+| opaque container `UIView` + full-view `UIPanGestureRecognizer`, `cancelsTouchesInView = false` | **NO** | registered 20:37, never evaluated before being reverted |
+| `-webkit-app-region: no-drag` | yes | no effect (Electron-only) |
 
-With NiiVue *also* tracking the pointer, the two fight over one delta and the
-render jitters while the window slides. The resolution is to stop competing:
-`quicklook.html` sets `pointer-events: none` on the canvas, so the window drags
-smoothly and the image stays put. The UIKit gesture recognizer and the page's
-`preventDefault` were removed as dead weight once the canvas stopped receiving
-events; `user-select: none` stays, because a primary drag belongs to the window
-rather than to WebKit text selection.
+On 2026-08-01 this was written up as "four attempts failed" and the preview was
+made static with `pointer-events: none`. **That conclusion was not supported by
+the evidence**: the third attempt was registered and then removed before anyone
+looked at it. Reverted 2026-08-02; the canvas is interactive again and the
+container + recognizer is back, this time to be tested.
 
-**Interactive rotation would require a native AppKit `QLPreviewingController`
-target rather than a Catalyst one.** That is a plan-level change, not another
-gesture layer. Recorded here so the next person does not re-run the same four
-experiments.
+### The testing failure underneath it
 
-Consequence for the record: the Milestone 5 exit gate "every mesh/tract fixture
-is visible, centred, and interactively rotatable" is met only in its first two
-thirds. Rotation was verified in the headless harness, where the host window
-does not exist; it is not available in Finder.
+Three separate times this round, a conclusion was drawn from a build that was
+not the one under test:
+
+1. An old `/tmp/nv-mac` tree (14:28) held the registration while newer builds
+   were being tested.
+2. An `xcodebuild archive` run by an audit agent silently took the registration
+   at 22:31 and kept it for hours.
+3. The container/recognizer attempt was reverted without ever being run.
+
+Registration moves silently whenever a second copy of the app exists, and
+nothing in the workflow surfaced it. Two things now do:
+
+- **`./scripts/install-quicklook.sh`** builds, evicts every other registered
+  copy, registers this one, clears the Quick Look cache, and fails if more than
+  one copy is registered.
+- **The extension logs its own build time on every preview.** `log show … | grep
+  built` answers "which binary did Finder actually run" without inference.
+
+Use both before concluding anything about a Finder-observable behaviour.
+
+### If the recognizer does not work either
+
+The remaining option is a **native AppKit `QLPreviewingController` target**
+instead of a Catalyst one, where `NSView.mouseDownCanMoveWindow` can be
+overridden to refuse the window drag outright — the documented mechanism, and
+not reachable from UIKit. The web assets, the scheme handler and the page are
+all platform-agnostic already; only the ~200 lines of view-controller glue are
+UIKit-specific. That is the escalation, and it is a real option rather than a
+dead end.
 
 ## Audit round 5 — the first review of the Quick Look work (2026-08-01)
 

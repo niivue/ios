@@ -48,7 +48,7 @@ private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
-class PreviewViewController: UIViewController, QLPreviewingController, WKScriptMessageHandler, WKNavigationDelegate {
+class PreviewViewController: UIViewController, QLPreviewingController, WKScriptMessageHandler, WKNavigationDelegate, UIGestureRecognizerDelegate {
 
     /// Files arriving as plain gzip. See `disposition(for:)`.
     private static let gzipType = "org.gnu.gnu-zip-archive"
@@ -118,6 +118,15 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     /// When this extension process began, so a first preview can be told apart
     /// from a warm one in the log.
     private static let processStart = Date()
+    /// This binary's build time, read from its own executable.
+    private static let buildStamp: String = {
+        guard let exe = Bundle.main.executableURL,
+              let date = (try? exe.resourceValues(forKeys: [.contentModificationDateKey]))?
+                  .contentModificationDate else { return "unknown" }
+        let f = DateFormatter()
+        f.dateFormat = "MMM d HH:mm:ss"
+        return f.string(from: date)
+    }()
 
     private struct PreviewRequest {
         let displayName: String
@@ -147,7 +156,7 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         // Opaque, unlike the host app's web view: this page is solid black and
-        // has no SwiftUI background to reveal. Opacity is only a rendering hint.
+        // has no SwiftUI background to reveal.
         webView.isOpaque = true
         webView.backgroundColor = .black
         webView.scrollView.bounces = false
@@ -251,6 +260,10 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
         startedAt = Date()
+        // Which binary is actually running. Registration silently moves when a
+        // second copy of the app is built or archived, so "am I testing the
+        // current build?" has to be answerable from the log rather than assumed.
+        log.notice("preview extension built \(Self.buildStamp, privacy: .public)")
         // Quick Look is not documented to load the view before preparing, and
         // every path below touches the web view. Forcing it here turns a
         // hypothetical ordering change from a nil-unwrap crash into a no-op.

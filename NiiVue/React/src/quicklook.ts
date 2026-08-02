@@ -154,6 +154,24 @@ function showMetadataOnly(name: string, pairs: Record<string, string>, reason: s
   showFallback(`No image preview for this file — ${reason}.`)
 }
 
+/**
+ * Claim drags on the canvas for the page.
+ *
+ * NiiVue's `pointerdown` handler never calls `preventDefault`
+ * (`control/interactions.ts`), so the gesture is left unclaimed and the host is
+ * free to treat it as a window drag on top of the rotation the user asked for.
+ * This is necessary but, on its own, was not sufficient — the UIKit half in
+ * `PreviewViewController.loadView` is the other half of the same fix.
+ *
+ * Safe because NiiVue binds only pointer events on the canvas
+ * (`control/interactions.ts:2092-2098`) and no mouse listeners, so suppressing
+ * the compatibility mouse events costs it nothing; `preventDefault` does not
+ * stop propagation, so NiiVue's own handler still runs.
+ */
+function claimPointerGestures(): void {
+  canvas().addEventListener('pointerdown', (event) => event.preventDefault(), { capture: true })
+}
+
 /*
  * There is no ResizeObserver here, deliberately. Milestone 2 added one to keep
  * the drawing buffer matched as Finder resizes the panel; it observed the
@@ -205,9 +223,8 @@ const QUADRANTS: CustomLayoutTile[] = [
  * No camera fitting is done here on purpose. NiiVue derives its orthographic
  * frustum from the object's own extents (`baseScale = 0.8 * furthestFromPivot`
  * in `math/NVTransforms.ts`), so `scaleMultiplier` at its default of 1 already
- * *is* the fitted view — which matters more than it used to, because the
- * canvas is `pointer-events: none` and the user cannot correct the framing by
- * dragging. See the interaction decision in `quicklook_plan.md`.
+ * *is* the fitted view, so the preview opens framed correctly whether or not
+ * the user ever drags it.
  */
 async function renderMesh(instance: NiiVue, request: PreviewRequest): Promise<void> {
   let mesh: NVMesh
@@ -367,6 +384,7 @@ async function main(): Promise<void> {
       meshXRay: 0.05,
     })
     await nv.attachToCanvas(canvas())
+    claimPointerGestures()
   } catch (error) {
     // Both graphics backends are gone. The native side turns this into its own
     // fallback view; without the message it would see a black rectangle.

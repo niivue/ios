@@ -651,15 +651,22 @@ are still escaped, which is what that encoding was actually protecting against.
 page is solid black and has no SwiftUI background to reveal. This is a rendering
 hint, not the window-drag fix.
 
-**Quick Look previews are static on Mac Catalyst.** The host treats a primary
-drag over remote Catalyst content as a window drag. NiiVue also handling that
-sequence makes rotation jitter because its coordinate space moves underneath
-the pointer. `quicklook.html` therefore sets `pointer-events: none` on the canvas:
-the window moves smoothly and the rendering stays fixed. A full-view UIKit pan,
-capture-phase `preventDefault`, opacity, and `-webkit-app-region: no-drag` were
-each insufficient to stop the cross-process AppKit gesture. Smooth interactive
-rotation would require a native AppKit Quick Look target, not another gesture
-layer in this Catalyst example.
+**Verify which binary Finder actually ran before concluding anything.** Quick
+Look registration moves silently whenever a second copy of the app exists — an
+old `-derivedDataPath` tree, an `xcodebuild archive`, a copy in `/Applications`.
+This has produced wrong conclusions three times. Use
+`./scripts/install-quicklook.sh` (builds, evicts every other copy, registers,
+clears the cache, fails if more than one is registered), and confirm with
+`log show --last 2m --predicate 'subsystem == "com.niivue.mobile.QuickLookPreview"' | grep built`
+— the extension logs its own build time on every preview.
+
+**The left-drag/window-drag conflict is not settled.** The host claims a drag
+over remote Catalyst content as a window drag. `preventDefault` in the page plus
+a full-view `UIPanGestureRecognizer` with `cancelsTouchesInView = false` is the
+current attempt; if it fails, the escalation is a native AppKit
+`QLPreviewingController` target where `NSView.mouseDownCanMoveWindow` can be
+overridden — not another gesture layer. Do not conclude it has failed from a
+build you have not verified is the registered one.
 
 **`quicklook.html` sets `user-select: none` on purpose.** A primary drag belongs
 to the native window, not to WebKit text selection. The strip's values still
