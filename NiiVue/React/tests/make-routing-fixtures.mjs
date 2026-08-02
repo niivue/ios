@@ -123,9 +123,11 @@ writeFileSync(
   volumes   four tiles: axial, coronal, sagittal, 3D render
   geometry  one fitted 3D view
 
-The preview is STATIC by design on Mac Catalyst: a drag moves the Quick Look
-window, as it does over any other preview, and the image must NOT rotate or
-turn blue. See the interaction decision in quicklook_plan.md.
+A drag inside the preview must move the crosshair in the slice views, or rotate
+the 3D render — and the Quick Look WINDOW must stay put, with no blue tint even
+on a long drag. If the window moves, or the panel goes blue, that is the
+regression this branch exists to prevent; see the interaction section of
+quicklook_plan.md.
 
 Also check while you are here:
   - series4d.nii reports "frames 1 of 8" in the strip

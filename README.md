@@ -290,9 +290,8 @@ pluginkit -m -v -A -D | grep niivue
   -f -R /Applications/NiiVue.app
 qlmanage -r && qlmanage -r cache
 
-# Watch what the extension is doing
-log show --last 5m --style compact \
-  --predicate 'subsystem == "com.niivue.mobile.QuickLookPreview"'
+# Confirm the extension is being invoked at all (development builds only)
+tail -5 ~/Library/Containers/com.niivue.mobile.QuickLookPreview/Data/tmp/quicklook-preview.log
 ```
 
 The app must have been launched at least once, and must live somewhere Launch

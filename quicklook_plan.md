@@ -646,9 +646,11 @@ The three open rows all need Finder, which `qlmanage` cannot drive from a
 non-GUI shell. Read the timings with:
 
 ```sh
-log show --last 10m --style compact \
-  --predicate 'subsystem == "com.niivue.mobile.QuickLookPreview"'
+tail -20 ~/Library/Containers/com.niivue.mobile.QuickLookPreview/Data/tmp/quicklook-preview.log
 ```
+
+(Originally written as a `log show` predicate. That does not work — `os_log`
+from a Quick Look appex never reaches it.)
 
 ## Milestone 8 — system verification (2026-08-01, automated half complete)
 
@@ -715,7 +717,7 @@ a Finder run to validate, so it is recorded rather than done.
 centred crosshair, frame-zero behaviour with the `frames 1 of N` reporting, the
 metadata-only fallbacks, both resource limits, the non-NIfTI `.gz`
 hand-back, the deferred list with reasons, and a troubleshooting block
-(`pluginkit`, `lsregister`, `qlmanage -r`, and the `log show` predicate).
+(`pluginkit`, `lsregister`, `qlmanage -r`, and the container trace file).
 
 ### Still requiring a Finder run
 
@@ -760,11 +762,12 @@ panel turns blue — the reported symptom exactly. Two halves make it possible:
   enough to extend the selection past the canvas, the canvas joins the range —
   which is the "past some amount" threshold, and why it persists after mouse-up.
 
-**Fix:** `-webkit-user-select: none; user-select: none` on `html, body`.
-Verified against the rebuilt `dist/`: `selectAll` now leaves the corner at
-`[0,0,0]` and `getSelection().toString()` empty. Nothing in a Quick Look panel
-should be selectable; the strip's values remain exposed to VoiceOver through
-`aria-label`, so nothing is lost.
+**Fix at the time:** `-webkit-user-select: none; user-select: none` on
+`html, body`. **This was later REVERSED and is now forbidden** — suppressing the
+selection is what handed the drag to the host window as a window move. See the
+interaction section below for the mechanism and the replacement. Left here
+because the reasoning above is still the correct diagnosis of the *tint*; only
+the remedy was wrong.
 
 **Caveat, recorded honestly:** the *appearance* mechanism is confirmed by
 measurement, and the missing guard is confirmed by inspection, but neither
@@ -935,8 +938,14 @@ nothing in the workflow surfaced it. Two things now do:
 - **`./scripts/install-quicklook.sh`** builds, evicts every other registered
   copy, registers this one, clears the Quick Look cache, and fails if more than
   one copy is registered.
-- **The extension logs its own build time on every preview.** `log show … | grep
-  built` answers "which binary did Finder actually run" without inference.
+- **The extension appends a build-stamped line to a file in its own container**
+  (`~/Library/Containers/…/Data/tmp/quicklook-preview.log`, Debug only) on every
+  preview, so "did it run, and which binary" is readable. **Not `log show`** —
+  `os_log` from a Quick Look appex does not reach it, as Milestone 0.5 recorded
+  and this branch re-confirmed.
+- Neither guarantee outlives the next `xcodebuild`: Xcode re-registers on every
+  Catalyst build of the app target, so any build can steal the registration.
+  Re-run the script with `--no-build` immediately before observing Finder.
 
 Use both before concluding anything about a Finder-observable behaviour.
 
@@ -1017,6 +1026,38 @@ additionally allocates `Float32Array(nVox3D*3)` and `Uint8Array(nVox3D*4)`, so
 for uint8 data the content process peak is roughly **17×** what this gate
 counts. The cap is conservative in the right direction but is not calibrated to
 that multiplier — it needs the device measurement Milestone 7 still owes.
+
+## Audit round 7 — pre-push check (2026-08-02)
+
+The code in the interaction fix was clean. Two defects were in the things
+*around* it, both of the same kind: a check that could not fail.
+
+- **`install-quicklook.sh` exited 0 on a failed build.** `set -uo pipefail`
+  without `-e`, and the build pipeline ended `|| true`. The page-hash check did
+  not save it, because the appex's **CopyFiles phase runs before Sources** — so
+  a Swift compile error leaves a freshly copied page beside the *previous*
+  build's binary, the hash matches, and the script prints green. The verifier
+  built to stop stale-binary testing would itself have certified one. Now
+  checks `PIPESTATUS[0]` and refuses to register; verified by deliberately
+  breaking a Swift file.
+- **The Finder sweep checklist still said the preview is static.** `good/
+  README.txt` is written from inside a generator script rather than a `.md`, so
+  the five reverting commits missed it. It instructed the human tester to record
+  the fixed behaviour as a bug and the bug as correct — inverting both halves of
+  the symptom the branch is about.
+
+Also corrected: three documents told the reader to verify with `log show`, which
+this branch had already established cannot work for a Quick Look appex — the
+same wrong conclusion the branch exists to prevent. And a superseded
+"**Fix:** `user-select: none`" heading survived in the dated section, three
+sections above where it is forbidden.
+
+One durable lesson recorded: **the "exactly one registered copy" guarantee lasts
+only until the next `xcodebuild`.** Xcode runs `lsregister -f -R` as an automatic
+phase on every Catalyst build of the app target, so any build — including one an
+audit agent runs — can steal the registration. That is how it drifted three
+times. Re-run `install-quicklook.sh --no-build` immediately before observing
+Finder.
 
 ## Regression coverage added for Milestones 3–5, 7
 

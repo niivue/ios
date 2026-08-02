@@ -125,6 +125,8 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const base = `http://127.0.0.1:${server.address().port}`
 
 const results = []
+/** Unexpected page exceptions, asserted at the end. See the `pageerror` hook. */
+const pageExceptions = []
 function check(name, ok, detail) {
   results.push(ok)
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`)
@@ -141,7 +143,14 @@ const browser = await chromium.launch({
  */
 async function openPreview() {
   const page = await browser.newPage({ viewport: { width: 700, height: 560 } })
-  page.on('pageerror', (e) => console.log('  [page exception]', e.message))
+  // Printing these but never failing on them is the "test shaped so it cannot
+  // fail" pattern again: a real exception in the interaction path would look
+  // exactly like the known synthesized-input artifact below. Anything not on
+  // the allow-list fails the run.
+  page.on('pageerror', (e) => {
+    console.log('  [page exception]', e.message)
+    if (!/setPointerCapture|No active pointer/.test(e.message)) pageExceptions.push(e.message)
+  })
   await page.addInitScript(() => {
     window.__posted = []
     window.webkit = {
@@ -487,6 +496,12 @@ check(
 )
 check('and the render survives it', (await quadrantPixels(page)).reduce((a, b) => a + b) > 500)
 await page.close()
+
+check(
+  'no unexpected page exceptions',
+  pageExceptions.length === 0,
+  pageExceptions.slice(0, 2).join(' | '),
+)
 
 await browser.close()
 server.close()

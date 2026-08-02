@@ -21,10 +21,20 @@ else B=''; R=''; G=''; DIM=''; N=''; fi
 
 if [ "${1:-}" != "--no-build" ]; then
   echo "${B}Building${N} Mac Catalyst…"
+  # PIPESTATUS, not $?: the pipe to grep would otherwise mask a failed build,
+  # and the page-hash check below cannot catch that — the appex's CopyFiles
+  # phase runs BEFORE Sources, so a Swift compile error leaves a freshly copied
+  # page beside the previous build's binary. The hash matches, and the script
+  # would certify a stale binary as fresh. That is the exact failure this script
+  # exists to prevent.
   ( cd "$REPO/NiiVue" && xcodebuild -project NiiVue.xcodeproj -scheme NiiVue \
       -destination 'platform=macOS,variant=Mac Catalyst,arch=arm64' \
       CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="" build ) \
-    2>&1 | grep -E "^\*\* BUILD|error:" || true
+    2>&1 | grep -E "^\*\* BUILD|error:"
+  if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+    echo "${R}Build failed — refusing to register. Nothing was changed.${N}"
+    exit 1
+  fi
 fi
 
 APP=$(ls -dt "$HOME"/Library/Developer/Xcode/DerivedData/NiiVue-*/Build/Products/Debug-maccatalyst/NiiVue.app 2>/dev/null | head -1)

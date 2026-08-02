@@ -655,10 +655,24 @@ hint, not the window-drag fix.
 Look registration moves silently whenever a second copy of the app exists — an
 old `-derivedDataPath` tree, an `xcodebuild archive`, a copy in `/Applications`.
 This has produced wrong conclusions three times. Use
-`./scripts/install-quicklook.sh` (builds, evicts every other copy, registers,
-clears the cache, fails if more than one is registered), and confirm with
-`log show --last 2m --predicate 'subsystem == "com.niivue.mobile.QuickLookPreview"' | grep built`
-— the extension logs its own build time on every preview.
+`./scripts/install-quicklook.sh` — it builds (and **refuses to register if the
+build failed**), evicts every other registered copy, hashes the shipped page
+against the one just built, and fails if more than one copy is registered. Then
+confirm the extension actually ran:
+
+```sh
+tail -5 ~/Library/Containers/com.niivue.mobile.QuickLookPreview/Data/tmp/quicklook-preview.log
+```
+
+Each preview appends a build-stamped line there. **Not `log show`** — `os_log`
+from a Quick Look appex does not reach it, which the Milestone 0.5 spike
+recorded and this branch confirmed by getting zero lines from a run that
+definitely happened. Debug builds only.
+
+Note the "exactly one copy" guarantee lasts only until the next `xcodebuild`:
+Xcode runs `lsregister -f -R` as an automatic phase on every Catalyst build of
+the app, so any build — including one an audit agent runs — can add or steal a
+registration. Re-run the script with `--no-build` before any Finder observation.
 
 **Do NOT suppress text selection in the preview page** (confirmed by observation, 2026-08-02). WebKit starts a
 document selection on a drag NiiVue does not `preventDefault`, and that
@@ -673,9 +687,11 @@ the Quick Look panel — `::selection` suppressed the tint in Playwright's WebKi
 but not in the real panel, where a long drag over a mesh still tinted the whole
 page. Clearing the range does not depend on how an engine paints a selected
 `<canvas>`, because nothing is selected by the time it would paint. This cost several rounds to work out; the
-symptom and its cause look unconnected. A left drag now moves the crosshair and
-rotates the render with the window staying put — verified in Finder, not
-inferred.
+symptom and its cause look unconnected. Confirmed in Finder by the owner on
+2026-08-02 against the build carrying **both** halves — the `::selection` rule
+and the `selectionchange` clearing: a left drag moves the crosshair and rotates
+the render, the window stays put, and a long drag over a mesh no longer tints
+the panel.
 
 **`attachToCanvas` replaces the canvas element** — NiiVue `cloneNode(false)`s it
 and calls `replaceChild`, so a reference taken before attaching is detached from
