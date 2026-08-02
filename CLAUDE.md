@@ -354,6 +354,15 @@ The NiiVue 1.0 source is checked out at `/Users/chris/src/mono/packages/niivue/s
 - **`ContentView.maxImportBytes` caps imports at 256 MB.** This is an input/storage
   policy, not a complete decompressed-voxel bound. The source itself is served by
   the scoped, chunked scheme transport; do not reintroduce a base64 file bridge.
+- **`prepareDocumentAccess` runs BEFORE the size check.** It looks like the wrong
+  order — a rejected oversized pick drops the accepted image's scope — but
+  `.fileSizeKey` on a security-scoped URL needs the scope already open, and the
+  recovery replay re-acquires. Do not reorder.
+- **`asCopy: false` means iCloud placeholders can fail to read.** A
+  non-downloaded item reports a correct logical size, so the cap check passes,
+  but `FileHandle(forReadingFrom:)` may fail or read a placeholder. It degrades
+  to the "could not open" alert. `NSFileCoordinator` is the fix if it ever
+  matters; it needs real provider files on a device to validate.
 - **The selected file remains a URL, not a retained payload.** `asCopy: false`
   keeps the security-scoped source available for recovery, and `WebViewManager`
   stops that scope when it is replaced or deinitialized.
@@ -393,207 +402,57 @@ Expected non-issues: the ~1.5 MB single-chunk Vite bundle-size warning, and the
 
 ## Known scaffolding (intentional, not bugs)
 
-- `setCrosshairColor` is defined on both sides but never called by any UI.
-- `SharedData` is *injected but inert*: `NiiVueApp` creates it and `ContentView`
-  declares `@EnvironmentObject var sharedData`, so deleting only the file breaks
-  the build — remove all three sites together. Its `location` is never written.
-  `WebViewManager.location` is written but no view reads it. It is deliberately **not** `@Published` — it updates per pointer-move, and
-  publishing it re-evaluated `ContentView`'s whole body at drag rate.
-- `com.apple.security.network.client` is granted but unused — the app fetches
-  nothing.
-- `UIFileSharingEnabled` in `Info.plist` is now **inert**. It used to expose the
-  Documents folder in the Files app back when drawings were written there; since
-  `DocumentExporter` landed, nothing writes to Documents at all (grep for
-  `documentsDirectory` returns nothing). Safe to delete — earlier revisions of this
-  file said the opposite.
+`SharedData` is injected but inert — `NiiVueApp` creates it and `ContentView`
+declares `@EnvironmentObject var sharedData`, so **deleting only the file breaks
+the build**; remove all three sites together. `WebViewManager.location` is
+written but never read, and is deliberately not `@Published`: it updates per
+pointer-move, and publishing it re-evaluated `ContentView`'s whole body at drag
+rate. `setCrosshairColor` and the app's `network.client` entitlement are
+likewise unused.
 
-## Regression tests — now in the repo
+## Regression tests
 
-`NiiVue/React/tests/bridge-regression.mjs`, run with `npm run test:bridge`. It
-drives the built `dist/` in headless Chromium over a throwaway http server, so it
-exercises the same bytes the app bundles. **12 checks, all passing as of this
-round.** Earlier revisions of this file said these were off-repo folklore to
-"recreate if useful"; they are not, and every external review since has flagged
-their absence.
+`npm run test:bridge` (12 checks) drives the app's built `dist/` in headless
+Chromium; `npm run test:preview` (88) does the same for the Quick Look page,
+with generated NIfTI/GIFTI fixtures in `tests/preview-fixtures.mjs`. Both
+exercise the bytes that actually ship. The bridge checks cover a load, the ten
+setters, a pen stroke and an export round-trip; a corrupt file that must leave
+the drawing intact; and a left drag that must move the crosshair.
 
-1. **Smoke** — load the sample, exercise the 10 bridge setters, paint a pen stroke,
-   `saveDrawing`, then gunzip the base64 and assert the NIfTI header
-   (188×256×190, `DT_UINT8`) and a non-zero painted-voxel count.
-2. **Corrupt file** — paint a stroke, then load garbage. The drawing must survive
-   and `loadImageURL` must reject.
-3. **Left drag** — with `primaryDragMode = crosshair`, a left drag must emit
-   `locationChange` events and move the crosshair several mm.
-
-Playwright is deliberately **not** a `package.json` dependency: the Xcode build
+**Playwright is deliberately not a `package.json` dependency** — the Xcode build
 phase runs `npm ci` on a fresh clone, and compiling the app should not pull a
-browser-automation stack. The harness resolves a local install first, then a
-global one. Install with `npm i -D playwright && npx playwright install chromium`.
+browser-automation stack. The harnesses resolve a local install, then a global
+one: `npm i -g playwright && npx playwright install chromium`.
 
-What this still does not cover, and what an external review will keep asking for:
-everything native. Document picking, the save panel, security-scoped provider
-files, the readiness handshake and content-process recovery need a simulator, a
-device, or a Mac.
-
-## Release readiness
-
-**Public deployment is NOT approved.** The owner's triage after audit round 2 was
-"developer addresses these, then external auditor re-reviews". Do not treat the
-list below as ordinary backlog — the four items marked *blocker* were release
-blockers, and the earlier "none is blocking" ranking in this file was wrong.
-
-Status of the four blockers, all addressed and awaiting re-review:
-
-| Blocker | Status |
-| --- | --- |
-| Import memory amplification | **Addressed at the transport layer** — imports use an opaque same-origin URL and bounded native reads; the *import* path has no Swift base64 string, WebKit base64 argument, `atob`, or retained `_sourceFile`. Note the **export** path still does: `bytesToBase64` → WebKit string → `Data(base64Encoded:)`. That is a separate, smaller, user-initiated peak — do not read this row as "the base64 chain is gone repo-wide". The 256 MB source cap remains an input policy; NiiVue's decompressed voxel allocation still needs representative-device measurement. |
-| Private WebKit file access | **Addressed** — replaced by `BundleSchemeHandler` (`WKURLSchemeHandler`). No private KVC remains. |
-| `+` button destroying the drawing | **Addressed** — the picker no longer clears `drawingEnabled`; the drawing is discarded only after a new volume actually loads, and cancelling leaves everything intact. |
-| Catalyst saves unreachable | **Addressed** — `DocumentExporter` presents `NSSavePanel` on Catalyst / Files "Save to" on iOS. Nothing is written to Documents behind the user's back. |
-
-The import limit is still a policy, not a complete memory guarantee. The expensive
-native-to-web base64 chain has been removed; the remaining peak is the handler's
-current read chunk, the browser fetch buffer, and NiiVue's decoded volume. Do not
-raise the limit until representative compressed/decompressed volumes have been
-measured on the supported devices.
-
-## Open items (not blocking, but each needs a decision)
-
-1. **Delete the React layer.** `App.tsx` + `main.tsx` only create a canvas and call
-   `startNiiVue` — there is no React UI anywhere. Replacing them with ~7 lines of
-   plain TS drops 7 of the 15 dependencies and makes the StrictMode cancellation
-   machinery (`isCancelled`, the teardown closure, the bridge-identity guard)
-   unnecessary rather than merely correct. ~120 lines, no behaviour change.
-2. **Collapse the settings plumbing.** Every viewer setting is currently written in
-   four places (a `@State`, an `.onChange`, a line in `applyViewerSettings()`, a
-   Swift wrapper, plus two TS sites). A `ViewerSettings` struct + one
-   `setOptions(dict)` bridge call would make it two. Note the per-setting cost of
-   pushing all of them at once is zero — every NiiVue setter ends in a
-   `requestAnimationFrame`-coalesced `drawScene()`.
-3. **Smaller:** `ContentView.swift` is ~1300 lines and splits cleanly into
-   three files; dead code confirmed on both sides (`setCrosshairColor`,
-   `SharedData`, the `locationChange` round-trip, a stray duplicate `dist` file
-   reference in the `NiiVueUITests` group). The picker type filter and
-   `Coordinator.isValidFileType` are **done** — no longer open.
-
-## Findings resolved in round 4 (the round that reviewed the transport itself)
-
-The transport landed in `32569d3`; this round audited **that code**, not the code
-it replaced. Every finding below is a defect in the round-3 fixes.
-
-- **`WKURLSchemeTask` callbacks raced `stop()` → hard crash.** The cancellation
-  flag was checked on a background queue and the send happened after it, while
-  `stop` arrived on the main queue. Messaging a stopped task raises an
-  uncatchable ObjC exception. Fixed by confining the flag and every `task.*` call
-  to the main queue (`deliver(_:_:)`), which also deleted `ReadState`'s lock.
-- **A latched crash loop was terminal.** Nothing called `load()` again, and the
-  remedy the alert suggested did nothing. Fixed with `pageIsDead` +
-  `allowAutoReload()`.
-- **A superseded load stranded a stale drawing on a live volume.** `closeDrawing`
-  now runs whenever `loadVolumes` succeeded, before the generation check.
-- **Swipe-dismissing the export sheet orphaned a full-size temp file.**
-  `onFinish` only covers the two delegate outcomes; cleanup is now also on
-  `.onChange(of: exportPresented)`.
-- **Every export failure said "draw something first."** Replaced `URL?` with
-  `SaveOutcome`; `TEARDOWN_ERROR` finally has a Swift consumer.
-- **`%` in a filename refused the load** (`URLComponents.path` does not escape it),
-  and the `HTTPURLResponse` fallback failed *open*, dropping CSP and `nosniff`.
-  Both fixed.
-
-Verified this round, no change needed: path containment and symlink handling in
-`BundleSchemeHandler` (no escape constructible), the `imageLoadRequest` /
-`loadingImageRequest` generation pair, `pageSession`, the generation-scoped
-watchdog, `enqueue`'s liveness, `WeakScriptMessageHandler`, and the CSP against
-the actual bundle (no WebAssembly, the one `new Function` is a guarded cbor-x
-probe, both workers are blob/self).
-
-**Refuted:** a claim that `reads`' `ObjectIdentifier` keys could collide via
-address reuse. The dispatched closure holds the task strongly until after
-`finishRead` runs, so the old task cannot be deallocated first.
-
-## Still open, with a decision attached
-
-- **No file coordination on picked files.** `asCopy: false` removed the picker's
-  implicit materialisation. A non-downloaded iCloud item or a third-party File
-  Provider file reports a correct logical size (so the cap check passes) but
-  `FileHandle(forReadingFrom:)` may fail or read a placeholder, and a concurrent
-  writer can change the file mid-stream. It degrades to the "could not open"
-  alert, so it is a capability regression, not a hole. The fix is
-  `NSFileCoordinator` around the read, or refusing on
-  `ubiquitousItemDownloadingStatus` at pick time — **not applied**, because it
-  needs real provider files on a device to validate, which this round could not do.
-- **The document token and security scope are never released.** Both live until
-  replaced, and `WebViewManager` is a `@StateObject`, so `deinit` effectively never
-  runs. Defence-in-depth only (the page is our own code under a self-only CSP).
-  **Not applied**: clearing the token when `loadImageURL` resolves assumes NiiVue
-  never re-fetches the URL lazily, which is not established for all 13 readers.
-- **`prepareDocumentAccess` runs before the size check**, so a rejected oversized
-  pick drops the *accepted* image's scope and holds the rejected one's. Self-heals
-  — the recovery replay re-acquires — and the early call is load-bearing, because
-  `.fileSizeKey` on a security-scoped URL needs the scope open. Left alone.
-- **Refactors, ranked** (from this round's refactor pass, none applied — the round
-  that fixes ordering bugs is the wrong one in which to restructure the code they
-  live in): delete the `locationChange` round-trip (dead, and it costs a
-  `JSON.stringify` + IPC per pointer-move on the *default* gesture, ≈ −15 lines) ·
-  delete `setCrosshairColor`, `SharedData` (3 sites) and the stray `dist` file
-  reference at `project.pbxproj:152` (≈ −30) · derive `incrementText` /
-  `decrementText` / `sliceTypeText` from `sliceType` instead of storing them, and
-  merge `incrementSlice`/`decrementSlice` (≈ −27; also fixes two masked
-  initialisation gaps) · then open items 2, 1, 3 in that order.
+Neither covers anything native: document picking, the save panel,
+security-scoped provider files, the readiness handshake, content-process
+recovery, and every Finder-facing Quick Look behaviour need a device or a Mac.
 
 ## Quick Look preview extension (in progress)
 
-Built and working; **not released**. `README.md` documents it for users — treat
-that as describing the branch, not a shipped feature. The planning document
-(`quicklook_plan.md`) was deleted once its content was executed; everything
-below is what survived it, plus what is still open.
+Built and working, not yet released. `README.md` documents it for users.
 
-### Still outstanding
+**`maxDecodedBytes` is not calibrated.** It counts decoded *file* bytes, but
+NiiVue additionally allocates `Float32Array(nVox3D*3)` + `Uint8Array(nVox3D*4)`,
+so for uint8 data the content-process peak is roughly **17×** what the gate
+counts. Conservative in the right direction; a real number needs a device
+measurement. A consequence worth knowing: an oversize legitimate 4D series is
+refused outright rather than shown at frame zero.
 
-All Finder-facing, because `qlmanage -p` emits nothing from a non-GUI shell and
-the headless suite cannot see the panel:
-
-- Per-format spacebar sweep of `good/` and `bad/` (run
-  `./scripts/check-quicklook-routing.sh`, which builds both and prints the
-  `open` commands). In particular: `archive.tar.gz` must keep Finder's own
-  preview, not ours.
-- Space opens/closes, Escape dismisses, the panel resizes.
-- Discovery after a clean install, app replacement, cache reset, and reboot.
-- The **≤2 s gate**, from `preparePreviewOfFile` entry to `loaded`, with cold
-  extension-launch cost reported separately. Read it from the container trace
-  file, not `log show`.
-- **Twenty sequential open/dismiss cycles** returning near baseline memory.
-- Intel Macs: builds universal, verified on Apple Silicon only. Say that rather
-  than claiming Intel support.
-
-### Open decisions, none of them mine to make
-
-- **An oversize legitimate 4D series is now refused** ("This file is too large
-  to preview") rather than shown at frame zero, which is what `limitFrames4D`
-  was adopted to avoid. Either raise the cap on measured device headroom, or
-  route oversize 4D to the metadata-only panel that already exists.
-- **`maxDecodedBytes` is not calibrated.** It counts decoded *file* bytes, but
-  NiiVue additionally allocates `Float32Array(nVox3D*3)` + `Uint8Array(nVox3D*4)`,
-  so for uint8 data the content-process peak is roughly **17×** what the gate
-  counts. Conservative in the right direction; needs a device measurement.
-- **Teardown does not release the NiiVue instance or the `WKWebView`.** The
-  WebGL context, decoded volume and 3D textures live until the controller
-  deallocates. Note `webView.load(about:blank)` is not available as a fix — the
-  navigation delegate allows only the app scheme. Verify any fix with the
-  twenty-cycle RSS measurement rather than asserting it.
+**Teardown does not release the NiiVue instance or the `WKWebView`.** The WebGL
+context, decoded volume and 3D textures live until the controller deallocates.
+`webView.load(about:blank)` is not available as a fix — the navigation delegate
+allows only the app scheme.
 
 ### Standing obligations
 
-- **The `.gz` claim must stay strict.** The extension claims
-  `org.gnu.gnu-zip-archive` because macOS resolves a type from the last
-  extension component only, so `.nii.gz` cannot have its own UTI — that makes us
-  the previewer for *every* gzip on the machine. `GzipPeek` + `VolumeSniff` read
-  the actual header. Do not loosen the sniff, and never render on the strength
-  of a filename. (Both comparable tools — NIfTIViewQL and MIQ — take the same
-  broad claim but discriminate by *filename*, which mis-accepts a renamed file
-  and mis-rejects a correct one. Ours is stronger; keep it that way.)
-  A foreign archive is declined with an `NSError` so Finder falls back —
-  behaviour that is **not** documented by Apple and is still unverified against
-  a competing archive previewer. See `README.md`.
+- **The `.gz` claim must stay strict.** macOS resolves a type from the last
+  extension component only, so `.nii.gz` cannot have its own UTI — the extension
+  must claim `org.gnu.gnu-zip-archive`, which makes it the previewer for *every*
+  gzip on the machine. `GzipPeek` + `VolumeSniff` read the actual header. Never
+  loosen the sniff, and never render on the strength of a filename. A foreign
+  archive is declined with an `NSError` so Finder falls back — not documented by
+  Apple, and unverified against a competing archive previewer.
 - **No detached formats.** NIfTI `.hdr`/`.img`, `.mhd`, AFNI `.HEAD`/`.BRIK`,
   `.nhdr` are out. `.hdr` resolves to **`public.radiance`** (Apple's HDR image
   type, which has a working preview) and `.img` to
@@ -604,23 +463,16 @@ the headless suite cannot see the panel:
 - **Known gap:** `.gii.gz` is declined — it resolves to generic gzip and the
   NIfTI sniff correctly rejects it. Teaching the sniff to recognise GIFTI XML is
   possible but is exactly what the obligation above forbids without a decision.
-- **The app declares no `CFBundleDocumentTypes`, deliberately.** The action
-  button in the Quick Look panel ("Open with X", or a verb like "Uncompress")
-  is Finder's, and shows the **default role handler** for the file's type — it
-  has nothing to do with this extension. Adding Viewer roles to put NiiVue there
-  was considered and declined (owner, 2026-08-02): it reverses the contract line
-  about not becoming a general file handler, it would not change the button
-  while other apps hold those defaults (on the dev machine MRIcroGL, MRIcro,
-  Surfice and workbench do), and `.nii.gz` could never be changed at all — its
-  type *is* `org.gnu.gnu-zip-archive`, so the button can only say NiiVue if
-  NiiVue becomes the default opener for **every gzip on the machine**. A Quick
-  Look claim is invisible when we decline; a document-type claim would not be.
-  (Note: an "Open with NiiVue medical image viewer" button on `.mz3` is a NiiVue
-  *Chrome PWA*, not this app.)
+- **The app declares no `CFBundleDocumentTypes`, deliberately.** The Quick Look
+  panel's action button ("Open with X", or "Uncompress") is Finder's and shows
+  the default role handler for the type — nothing to do with this extension.
+  Adding Viewer roles was considered and declined: it would not change the
+  button while other viewers hold those defaults, and `.nii.gz` could never
+  change at all without NiiVue becoming the default opener for **every gzip on
+  the machine**.
 - `files.user-selected.read-only` is **kept**: the narrowest file entitlement
-  available, matching Apple's own template, and it grants nothing absent a user
-  selection the extension never performs. Removing it is a plausible tightening
-  that needs a Finder run to validate.
+  available, matching Apple's template, and it grants nothing absent a user
+  selection the extension never performs.
 
 ### The recurring failure mode in this work
 
@@ -635,13 +487,6 @@ Two patterns cost most of the time spent here, and both will recur:
 2. **Fix-commits are the richest source of new bugs.** Every audit round found
    that most defects had been introduced by the previous round's fixes. Audit
    the fix, not just the original.
-
-Web-side checks for the preview live in
-`NiiVue/React/tests/preview-regression.mjs` (`npm run test:preview`, 78 checks)
-with generated NIfTI/GIFTI fixtures in `tests/preview-fixtures.mjs`. They are
-separate from `test:bridge` because the two pages share no code. The mesh and
-tract checks read real files from the private Git-LFS `dev-images` package by
-absolute path and print `SKIP` when it is absent.
 
 **`limitFrames4D` bounds RETENTION, not decoding.** NiiVue's partial streaming
 loader is unreachable from `loadVolumes` for every format — the worker fetches
