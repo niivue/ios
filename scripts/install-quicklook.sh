@@ -52,9 +52,24 @@ COUNT=$(/usr/bin/pluginkit -m -v -A -D 2>/dev/null | grep -cF "$ID")
 STAMP=$(stat -f '%Sm' -t '%b %d %H:%M:%S' "$APP/Contents/PlugIns/QuickLookPreview.appex/Contents/MacOS/QuickLookPreview")
 echo "  ${B}built $STAMP${N}"
 if [ "$COUNT" -ne 1 ]; then echo "${R}  $COUNT copies registered — Finder may pick either.${N}"; exit 1; fi
+# Verify the SHIPPED page is the one we just built. The bundle copy has gone
+# stale before, and a binary date says nothing about the web assets inside it.
+SRC="$REPO/NiiVue/React/dist/quicklook.html"
+DST="$APP/Contents/PlugIns/QuickLookPreview.appex/Contents/Resources/dist/quicklook.html"
+if [ -f "$SRC" ] && [ -f "$DST" ]; then
+  if [ "$(shasum -a 256 <"$SRC" | cut -c1-12)" = "$(shasum -a 256 <"$DST" | cut -c1-12)" ]; then
+    echo "  ${G}page matches the build${N} ($(shasum -a 256 <"$DST" | cut -c1-12))"
+  else
+    echo "  ${R}SHIPPED PAGE IS STALE — the appex does not contain the page you just built.${N}"
+    exit 1
+  fi
+fi
+
+LOG="$HOME/Library/Containers/$ID/Data/tmp/quicklook-preview.log"
+rm -f "$LOG" 2>/dev/null
 echo
-echo "${G}Verify what Finder actually ran${N} — preview a file, then:"
-echo "  log show --last 2m --style compact \\"
-echo "    --predicate 'subsystem == \"com.niivue.mobile.QuickLookPreview\"' | grep built"
-echo "${DIM}It logs its own build time on every preview. If that does not match${N}"
-echo "${DIM}\"built $STAMP\" above, you are testing a different binary.${N}"
+echo "${B}Confirm it actually ran${N} — preview a file in Finder, then:"
+echo "  tail -5 \"$LOG\""
+echo "${DIM}Each preview appends a line with the build stamp. os_log from a Quick Look${N}"
+echo "${DIM}appex does NOT reach \`log show\`, so this file is the only reliable signal.${N}"
+echo "${DIM}An empty or missing file means the extension never ran at all.${N}"

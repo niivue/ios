@@ -118,6 +118,29 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     /// When this extension process began, so a first preview can be told apart
     /// from a warm one in the log.
     private static let processStart = Date()
+    /// Append a line to a diagnostic file inside this extension's container.
+    ///
+    /// Debug builds only. It exists because there is otherwise no way to answer
+    /// "did the extension run, and which build was it" — `os_log` output from a
+    /// Quick Look appex does not reach `log show`, and Finder gives no other
+    /// feedback. Several wrong conclusions in this project came from assuming an
+    /// answer to that question instead of reading one.
+    static func trace(_ message: String) {
+#if DEBUG
+        let path = NSHomeDirectory() + "/tmp/quicklook-preview.log"
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let line = "\(stamp)  build=\(buildStamp)  \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        if let handle = FileHandle(forWritingAtPath: path) {
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: URL(fileURLWithPath: path))
+        }
+#endif
+    }
+
     /// This binary's build time, read from its own executable.
     private static let buildStamp: String = {
         guard let exe = Bundle.main.executableURL,
@@ -263,10 +286,11 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
         startedAt = Date()
-        // Which binary is actually running. Registration silently moves when a
-        // second copy of the app is built or archived, so "am I testing the
-        // current build?" has to be answerable from the log rather than assumed.
-        log.notice("preview extension built \(Self.buildStamp, privacy: .public)")
+        // Which binary is actually running, and whether it ran at all.
+        // `os_log` from this extension is NOT readable via `log show` — that was
+        // recorded in the Milestone 0.5 spike and confirmed again — so the
+        // useful copy goes to a file in the extension's own container.
+        Self.trace("preview \(url.lastPathComponent)")
         // Quick Look is not documented to load the view before preparing, and
         // every path below touches the web view. Forcing it here turns a
         // hypothetical ordering change from a nil-unwrap crash into a no-op.
