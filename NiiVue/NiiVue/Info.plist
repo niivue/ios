@@ -52,7 +52,7 @@
 			<string>Gzipped FreeSurfer MGH Volume</string>
 			<key>UTTypeConformsTo</key>
 			<array>
-				<string>org.gnu.gnu-zip-archive</string>
+				<string>public.data</string>
 			</array>
 			<key>UTTypeTagSpecification</key>
 			<dict>
@@ -171,7 +171,7 @@
 			<string>TRX Streamlines</string>
 			<key>UTTypeConformsTo</key>
 			<array>
-				<string>public.zip-archive</string>
+				<string>public.data</string>
 			</array>
 			<key>UTTypeTagSpecification</key>
 			<dict>

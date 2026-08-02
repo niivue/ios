@@ -55,26 +55,30 @@ if ! (cd "$REPO/NiiVue/React" && node tests/make-routing-fixtures.mjs "$FIXTURES
   echo "${R}Could not generate fixtures.${N}"
   exit 1
 fi
-chmod 444 "$FIXTURES/readonly.nii"
+chmod 444 "$FIXTURES/good/readonly.nii"
 
 # Resolve each fixture's type exactly as PreviewViewController does, via
 # URLResourceValues.contentType, rather than by parsing the filename.
 cat > "$FIXTURES/uti.swift" <<'SWIFT'
 import Foundation
 import UniformTypeIdentifiers
-let dir = CommandLine.arguments[1]
-let names = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
-for name in names.sorted() where !name.hasPrefix(".") && !name.hasSuffix(".swift") {
-    let url = URL(fileURLWithPath: dir).appendingPathComponent(name)
-    let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)?.identifier ?? "?"
-    print("\(name)\t\(type)")
+let root = URL(fileURLWithPath: CommandLine.arguments[1])
+let fm = FileManager.default
+for folder in ["good", "bad"] {
+    let dir = root.appendingPathComponent(folder)
+    let names = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+    for name in names.sorted() where !name.hasPrefix(".") && name != "README.txt" {
+        let url = dir.appendingPathComponent(name)
+        let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)?.identifier ?? "?"
+        print("\(folder)/\(name)\t\(type)")
+    }
 }
 SWIFT
 
 FAILED=0
 CHECKED=0
 SKIPPED=0
-printf "${DIM}%-30s %-32s %-7s %-8s %s${N}\n" FIXTURE RESOLVED-TYPE ROUTES SHOULD VERDICT
+printf "${DIM}%-35s %-32s %-7s %-8s %s${N}\n" FIXTURE RESOLVED-TYPE ROUTES SHOULD VERDICT
 while IFS=$'\t' read -r name type; do
   # Tab-separated, and read with IFS set: a filename containing a space would
   # otherwise be split across the field variables. `with spaces.nii` exists in
@@ -85,16 +89,16 @@ while IFS=$'\t' read -r name type; do
   routes=no
   echo "$CLAIMED" | grep -qx "$type" && routes=yes
   short="$name"
-  [ ${#short} -gt 29 ] && short="${short:0:12}…${short: -16}"
+  [ ${#short} -gt 34 ] && short="${short:0:16}…${short: -17}"
   case "$render" in
     yes) want="render" ;;
     skip) want="skipped"; SKIPPED=$((SKIPPED + 1)) ;;
     *)   want=$([ "$routes" = yes ] && echo "explain" || echo "not ours") ;;
   esac
   if [ "$routes" = "$expect" ]; then
-    printf "%-30s %-32s %-7s %-8s ${G}ok${N}\n" "$short" "$type" "$routes" "$want"
+    printf "%-35s %-32s %-7s %-8s ${G}ok${N}\n" "$short" "$type" "$routes" "$want"
   else
-    printf "%-30s %-32s %-7s %-8s ${R}EXPECTED $expect${N}\n" "$short" "$type" "$routes" "$want"
+    printf "%-35s %-32s %-7s %-8s ${R}EXPECTED $expect${N}\n" "$short" "$type" "$routes" "$want"
     FAILED=$((FAILED + 1))
   fi
 done < <(swift "$FIXTURES/uti.swift" "$FIXTURES")
@@ -115,16 +119,13 @@ else
 fi
 [ "$SKIPPED" -gt 0 ] && echo "${DIM}$SKIPPED fixture(s) borrowed from the private dev-images package, which is absent.${N}"
 echo
-echo "${B}Manual half${N} — Finder cannot be driven from a shell:"
-echo "  open '$FIXTURES'"
+echo "${B}Manual half${N} — Finder cannot be driven from a shell. Two folders,"
+echo "one rule each; each carries a README.txt spelling out what to look for."
 echo
-echo "Every fixture holds real content, so the sweep is meaningful:"
-echo "  ${DIM}render${N}   draws an image — four tiles for volumes, a fitted 3D view for geometry"
-echo "  ${DIM}explain${N}  routes to us and must show a reason, never a blank panel."
-echo "           archive.tar.gz is the important one: it must keep Finder's own"
-echo "           preview, NOT be overpainted by ours."
-echo "  ${DIM}not ours${N} must not reach the extension at all"
+echo "  ${G}open '$FIXTURES/good'${N}   every file must DRAW AN IMAGE"
+echo "  ${R}open '$FIXTURES/bad'${N}    no file may draw an image"
 echo
-echo "Also check: Space opens/closes, Escape dismisses, the panel resizes, a drag"
-echo "rotates without moving the window, and series4d.nii reports 'frames 1 of 8'."
+echo "${DIM}Inside bad/, the split that matters: truncated/corrupt/layer-only must show"
+echo "OUR panel with a reason, while archive.tar.gz and the unclaimed types must"
+echo "keep whatever macOS shows. An archive wearing our panel is a regression.${N}"
 exit $((FAILED > 0))

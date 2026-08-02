@@ -562,6 +562,22 @@ separate from `test:bridge` because the two pages share no code. The mesh and
 tract checks read real files from the private Git-LFS `dev-images` package by
 absolute path and print `SKIP` when it is absent.
 
+**The document route must keep `.` unescaped.** `NVMesh.loadMesh` reads the
+reader extension from the URL and ignores the `name` passed with it, and an
+unknown extension falls back to the **MZ3 reader** — so a fully-escaped route
+makes `.mz3` work by accident while `.gii`/`.tck`/`.trk`/`.trx` all fail.
+`registerDocument` escapes everything except alphanumerics and `.`; `/` and `%`
+are still escaped, which is what that encoding was actually protecting against.
+
+**Container-based document types must not conform to archive types.**
+`org.trx.trx` and `edu.mgh.freesurfer.mgz` conform to `public.data`, not
+`public.zip-archive`/`org.gnu.gnu-zip-archive` — otherwise macOS offers to
+"Uncompress" them. Same reason `.docx`, `.jar` and `.epub` do not.
+
+**`webView.isOpaque = true` in the extension**, unlike the host app. A Quick
+Look panel is movable by its background, and a non-opaque web view lets a drag
+read as a window drag.
+
 **The preview page must claim pointer gestures itself.** NiiVue's `pointerdown`
 never calls `preventDefault`, and a Quick Look panel is movable by its
 background, so an unclaimed drag both moves the window (with jitter, as NiiVue

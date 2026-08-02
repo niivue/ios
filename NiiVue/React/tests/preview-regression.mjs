@@ -77,11 +77,34 @@ const MIME = {
   '.json': 'application/json',
 }
 
+/**
+ * Mirror the extension's opaque document route: `/document/<token>/<name>`,
+ * percent-encoded exactly as `PreviewSchemeHandler.registerDocument` does —
+ * every character escaped except alphanumerics and `.`.
+ *
+ * Serving fixtures at a plain `/fixtures/name.tck` hid a real bug for a whole
+ * milestone: `NVMesh.loadMesh` reads the reader extension from the URL and
+ * ignores the `name` we pass, so a fully-escaped route silently fell back to
+ * the MZ3 reader and every mesh format except `.mz3` failed. Tests that do not
+ * use the shape the extension actually uses cannot catch that.
+ */
+function documentURL(base, name) {
+  const encoded = [...name]
+    .map((c) => (/[A-Za-z0-9.]/.test(c) ? c : encodeURIComponent(c).replace(/%/g, '%')))
+    .join('')
+    .replace(/[^A-Za-z0-9.%]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
+  return `${base}/document/00000000-0000-4000-8000-000000000000/${encoded}`
+}
+
 const server = createServer(async (req, res) => {
   const path = normalize(decodeURIComponent(req.url.split('?')[0]))
   try {
     let body
-    if (path.startsWith('/fixtures/')) {
+    if (path.startsWith('/document/')) {
+      // token/name — the name is the last component, and identifies the fixture.
+      body = FIXTURES[path.split('/').pop()]
+      if (!body) throw new Error('no such fixture')
+    } else if (path.startsWith('/fixtures/')) {
       body = FIXTURES[path.slice('/fixtures/'.length)]
       if (!body) throw new Error('no such fixture')
     } else if (path.startsWith('/meshes/')) {
@@ -234,7 +257,7 @@ check('the fallback does not overpaint a loaded preview', await result.page.loca
 await result.page.close()
 
 // --- 3. Synthetic geometry, so the numbers are known exactly ----------------
-result = await preview(`${base}/fixtures/basic.nii`, 'basic.nii', { fileSize: 1234 })
+result = await preview(documentURL(base, 'basic.nii'), 'basic.nii', { fileSize: 1234 })
 meta = result.message?.metadata ?? {}
 check('synthetic dims are exact', meta.dims === '24×28×20', meta.dims)
 check('synthetic spacing is exact', meta.voxel === '2×2×2.5 mm', meta.voxel)
@@ -244,7 +267,7 @@ check('synthetic datatype is uint8', meta.type === 'uint8', meta.type)
 await result.page.close()
 
 // --- 4. 4D keeps frame zero and reports the total ---------------------------
-result = await preview(`${base}/fixtures/series.nii`, 'series.nii')
+result = await preview(documentURL(base, 'series.nii'), 'series.nii')
 meta = result.message?.metadata ?? {}
 check('a 4D file loads', result.message?.stage === 'loaded', result.message?.stage)
 check('it reports one frame of seven', meta.frames === '1 of 7', meta.frames)
@@ -256,7 +279,7 @@ await result.page.close()
 // both parse, so their headers are worth showing rather than discarding behind
 // an error.
 for (const file of ['flat.nii', 'truncated.nii']) {
-  result = await preview(`${base}/fixtures/${file}`, file)
+  result = await preview(documentURL(base, file), file)
   meta = result.message?.metadata ?? {}
   const shown = await result.page.locator('#meta').innerText()
   check(`${file} is not an error`, result.message?.stage === 'loaded', result.message?.stage)
@@ -268,14 +291,14 @@ for (const file of ['flat.nii', 'truncated.nii']) {
 
 // A datatype NiiVue refuses outright never becomes a volume, so it cannot reach
 // the metadata path — but it must not be reported as a damaged file either.
-result = await preview(`${base}/fixtures/complex.nii`, 'complex.nii')
+result = await preview(documentURL(base, 'complex.nii'), 'complex.nii')
 check('complex data is unsupported, not unreadable', result.message?.code === 'unsupported', result.message?.code)
 check('complex data still shows a panel', await result.page.locator('#fallback').isVisible())
 await result.page.close()
 
 // --- 6. Malformed input fails visibly, and never blankly -------------------
 for (const file of ['empty.nii', 'garbage.nii']) {
-  result = await preview(`${base}/fixtures/${file}`, file)
+  result = await preview(documentURL(base, file), file)
   const panelShown =
     (await result.page.locator('#fallback').isVisible()) ||
     (await result.page.locator('#meta').isVisible())
@@ -306,7 +329,7 @@ check('the fallback panel is visible', await result.page.locator('#fallback').is
 await result.page.close()
 
 // --- 9. Geometry: a synthetic surface renders and reports its counts -------
-result = await preview(`${base}/fixtures/surface.gii`, 'surface.gii', { family: 'mesh', fileSize: 900 })
+result = await preview(documentURL(base, 'surface.gii'), 'surface.gii', { family: 'mesh', fileSize: 900 })
 meta = result.message?.metadata ?? {}
 check('a GIFTI surface loads', result.message?.stage === 'loaded', result.message?.stage)
 check('it is displayable', meta.displayable === 'true', meta.displayable)
@@ -318,7 +341,7 @@ check('the render is visible', (await quadrantPixels(result.page)).reduce((a, b)
 await result.page.close()
 
 // --- 10. Layer-only GIFTI: metadata, and no hunt for a companion ----------
-result = await preview(`${base}/fixtures/layer.gii`, 'layer.gii', { family: 'mesh' })
+result = await preview(documentURL(base, 'layer.gii'), 'layer.gii', { family: 'mesh' })
 meta = result.message?.metadata ?? {}
 let detail = await result.page.locator('#fallback-detail').innerText()
 check('a layer-only GIFTI is not an error', result.message?.stage === 'loaded', result.message?.stage)
@@ -327,7 +350,7 @@ check('it says the surface is missing, not that the file is bad', /per-vertex da
 check('it reports the layer it does have', meta.layers === '1', meta.layers)
 await result.page.close()
 
-result = await preview(`${base}/fixtures/garbage.mz3`, 'garbage.mz3', { family: 'mesh' })
+result = await preview(documentURL(base, 'garbage.mz3'), 'garbage.mz3', { family: 'mesh' })
 check('a malformed mesh fails visibly', result.message?.stage === 'failed', result.message?.code)
 check('and shows a panel', await result.page.locator('#fallback').isVisible())
 await result.page.close()
@@ -350,7 +373,7 @@ if (!existsSync(LFS_MESHES)) {
 }
 
 // --- 12. Rotatable and resizable ------------------------------------------
-result = await preview(`${base}/fixtures/surface.gii`, 'surface.gii', { family: 'mesh' })
+result = await preview(documentURL(base, 'surface.gii'), 'surface.gii', { family: 'mesh' })
 page = result.page
 const before = (await page.locator('#gl').screenshot({ type: 'png' })).toString('base64')
 const box = await page.locator('#gl').boundingBox()

@@ -77,7 +77,19 @@ final class PreviewSchemeHandler: NSObject, WKURLSchemeHandler {
         // it: that setter leaves a literal `%` alone, so a file named `a%2Fb.nii`
         // would round-trip through `url.path` as `a/b.nii` — four path components
         // instead of three, and a refused load.
-        let encoded = fileName.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        //
+        // `.` is deliberately left unescaped, and that is load-bearing rather
+        // than cosmetic. `NVMesh.loadMesh` takes the reader extension from the
+        // **URL** and ignores the `name` we pass alongside it
+        // (`mesh/NVMesh.ts:192`), so a fully-escaped route carries no extension
+        // at all: `isTractExtension('')` is false, `readerByExt.get('')` misses,
+        // and NiiVue silently falls back to the MZ3 reader. The symptom is that
+        // `.mz3` previews correctly by accident while `.gii`, `.tck`, `.trk` and
+        // `.trx` all fail. A dot cannot create a path component, so allowing it
+        // costs nothing the aggressive encoding was protecting against — `/` and
+        // `%` are still escaped, which is what that protection was actually for.
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "."))
+        let encoded = fileName.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
         components.percentEncodedPath = "/document/\(token)/\(encoded)"
         return components.url!
     }

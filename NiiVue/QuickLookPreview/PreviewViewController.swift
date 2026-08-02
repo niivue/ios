@@ -133,7 +133,16 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
 
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
-        webView.isOpaque = false
+        // OPAQUE, unlike the host app's web view.
+        //
+        // The app sets `isOpaque = false` so its SwiftUI background shows
+        // through; Milestone 2 copied that here, where it is actively harmful.
+        // A Quick Look panel is movable by its background, and a non-opaque view
+        // lets a click read as landing on that background — so a rotate-drag
+        // moved the whole window, and NiiVue kept tracking a pointer whose
+        // window was sliding out from under it, which is the jitter. The page is
+        // solid black regardless, so nothing is lost by owning every pixel.
+        webView.isOpaque = true
         webView.backgroundColor = .black
         webView.scrollView.bounces = false
         webView.scrollView.isScrollEnabled = false

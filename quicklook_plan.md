@@ -799,6 +799,62 @@ that dispatches a cancelable `pointerdown` and asserts `defaultPrevented`.
 Both symptoms — blue cast and window drag — trace to one omission, and the two
 fixes are independent because they suppress two different default actions.
 
+## Three defects found by the owner's Finder sweep (2026-08-01)
+
+All three were invisible to the headless suite, and each shows a different way
+a test can be shaped so it cannot fail.
+
+### 1. Every mesh format except `.mz3` failed to load
+
+`NVMesh.loadMesh` takes its reader extension from `mesh.url` and **ignores the
+`name` we pass alongside it** (`mesh/NVMesh.ts:192`). Volumes are fine —
+`loadVolumes` does honour `name` — but the document route escaped every
+non-alphanumeric, so the mesh URL carried no extension at all:
+`isTractExtension('')` is false, `readerByExt.get('')` misses, and NiiVue
+**silently falls back to the MZ3 reader**. So `.mz3` previewed correctly by
+accident while `.gii`, `.tck`, `.trk` and `.trx` all failed.
+
+Fixed by leaving `.` unescaped in `registerDocument`. A dot cannot create a path
+component, so it costs nothing the aggressive encoding was protecting against —
+`/` and `%` are still escaped, which is what that protection was actually for.
+Verified against the real Swift: `tract.SLF1_R.tck` now routes as
+`…/document/TOKEN/tract.SLF1%5FR.tck`, extension `tck`, and the exact round-trip
+still holds for the `a%2Fb.nii` trap that motivated the encoding.
+
+**Why the suite missed it:** it served fixtures at `/fixtures/tracts.tck` — a
+plain URL with a real extension — so it never used the shape the extension
+actually uses. The tests now build a token-shaped `/document/<token>/<encoded>`
+URL with the same encoding rule.
+
+### 2. `.trx` was claimed as an archive
+
+The exported declaration conformed `org.trx.trx` to `public.zip-archive`.
+Accurate — a TRX *is* a zip — but it hands the file to Archive Utility, so macOS
+offers to uncompress it. Zip-based *document* formats deliberately do not do
+this: `.docx`, `.jar` and `.epub` all conform to `public.data`. Changed to
+`public.data`, and `.mgz` likewise (it conformed to `org.gnu.gnu-zip-archive`
+with the same consequence). Neither affects routing, which is by exact
+identifier, nor the gzip sniff, which matches `org.gnu.gnu-zip-archive` exactly
+rather than by conformance.
+
+### 3. The rotate-drag moved the Quick Look window
+
+`preventDefault` on `pointerdown` was necessary but not sufficient. The
+remaining cause was `webView.isOpaque = false`, copied in Milestone 2 from the
+host app — where it exists so the SwiftUI background shows through. A Quick Look
+panel is movable by its background, and a non-opaque web view lets a click read
+as landing on that background. The page is solid black regardless, so
+`isOpaque = true` costs nothing.
+
+### The fixture directory was also wrong
+
+The first version wrote **zero-byte** files. They proved routing and nothing
+else: every one would have shown a fallback panel, so the "rendered contract"
+half of the exit gate could not be observed at all. The generator now writes
+real NIfTI, NRRD, MetaImage, MGH/MGZ, GIFTI, MZ3 and TCK content, and the set is
+split into `good/` and `bad/` at the owner's suggestion, each with a README
+stating its rule, so a spacebar sweep needs no lookup table.
+
 ## Regression coverage added for Milestones 3–5, 7
 
 `NiiVue/React/tests/preview-regression.mjs`, run with `npm run test:preview`.
