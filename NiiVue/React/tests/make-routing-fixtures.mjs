@@ -15,7 +15,7 @@
 import { writeFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
-import { nifti1, gifti, octahedron, nrrd, mha, mgh, mz3, tck, arcs } from './preview-fixtures.mjs'
+import { SPECIMENS, nrrd, mha, mgh, mz3, tck, arcs, octahedron } from './preview-fixtures.mjs'
 
 const dir = process.argv[2]
 if (!dir) {
@@ -51,7 +51,7 @@ function put(name, body, expect, render) {
   rows.push([`${folder}/${name}`, expect, render])
 }
 
-const volume = nifti1({ dims: [24, 28, 20], pixDims: [2, 2, 2.5] })
+const volume = SPECIMENS.volume()
 const surface = octahedron()
 
 // --- NIfTI, and the filename edge cases the plan calls for ------------------
@@ -66,7 +66,7 @@ put('readonly.nii', volume, 'yes', 'yes')
 put('compound.nii.gz', gzipSync(volume), 'yes', 'yes')
 put('double.NII.GZ', gzipSync(volume), 'yes', 'yes')
 // 4D: renders frame zero and must report "1 of 8".
-put('series4d.nii', nifti1({ dims: [16, 16, 12, 8] }), 'yes', 'yes')
+put('series4d.nii', SPECIMENS.series4d(), 'yes', 'yes')
 
 // --- The other claimed voxel containers ------------------------------------
 put('volume.mgh', mgh(), 'yes', 'yes')
@@ -75,7 +75,7 @@ put('volume.nrrd', nrrd(), 'yes', 'yes')
 put('volume.mha', mha(), 'yes', 'yes')
 
 // --- Geometry and tracts ----------------------------------------------------
-put('surface.gii', gifti(surface), 'yes', 'yes')
+put('surface.gii', SPECIMENS.surface(), 'yes', 'yes')
 put('surface.mz3', mz3(surface), 'yes', 'yes')
 put('tracts.tck', tck({ streamlines: arcs() }), 'yes', 'yes')
 for (const [name, source] of BORROWED) {
@@ -101,9 +101,9 @@ tar.write('fixture.txt', 0, 'ascii')
 tar.write('0000644\0', 100, 'ascii')
 tar.write('ustar\0', 257, 'ascii')
 put('archive.tar.gz', gzipSync(tar), 'yes', 'no')
-put('truncated.nii', nifti1({ dims: [24, 28, 20], truncateTo: 352 + 2000 }), 'yes', 'no')
-put('layeronly.gii', gifti({ scalars: [0, 1, 2, 3, 4, 5] }), 'yes', 'no')
-put('corrupt.nii', Buffer.from('not a volume in any format niivue reads '.repeat(64)), 'yes', 'no')
+put('truncated.nii', SPECIMENS.truncated(), 'yes', 'no')
+put('layeronly.gii', SPECIMENS.layerOnly(), 'yes', 'no')
+put('corrupt.nii', SPECIMENS.corrupt(), 'yes', 'no')
 
 // --- Types we must NOT intercept -------------------------------------------
 const detached = [

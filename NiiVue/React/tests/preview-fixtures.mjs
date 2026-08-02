@@ -281,6 +281,23 @@ export function arcs(count = 12, points = 24, radius = 40) {
   })
 }
 
+/**
+ * The specimens both consumers use, defined once.
+ *
+ * `preview-regression.mjs` asserts on these and `make-routing-fixtures.mjs`
+ * puts them in front of a human in Finder. They had already drifted — the
+ * truncated volume was 4832 B in one and 2352 B in the other — so the file the
+ * manual sweep exercised was not the file the automated check covered.
+ */
+export const SPECIMENS = {
+  volume: () => nifti1({ dims: [24, 28, 20], pixDims: [2, 2, 2.5] }),
+  series4d: () => nifti1({ dims: [16, 16, 12, 8] }),
+  truncated: () => nifti1({ dims: [24, 28, 20], truncateTo: 352 + Math.floor((24 * 28 * 20) / 3) }),
+  corrupt: () => Buffer.from('not a volume in any format niivue reads '.repeat(64)),
+  surface: () => gifti(octahedron()),
+  layerOnly: () => gifti({ scalars: [0, 1, 2, 3, 4, 5] }),
+}
+
 /** A closed octahedron, big enough in mm to look like something on screen. */
 export function octahedron(radius = 40) {
   const r = radius

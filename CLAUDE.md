@@ -578,6 +578,16 @@ shell is up and the file is slow" (20 s, ask the page to explain itself, with a
 2 s native backstop because a hung content process cannot answer). Checking only
 `completion != nil` killed legitimate slow renders at ten seconds.
 
+**The two scheme handlers diverge on their percent-encoding charset, and that
+is deliberate.** `BundleSchemeHandler` (app) escapes everything non-alphanumeric;
+`PreviewSchemeHandler` (extension) also allows `.`. Do **not** "harmonise" them
+to the app's form — see the next paragraph for why that breaks every mesh format
+except `.mz3`. If the two are ever unified into one file, the shared
+implementation must use the `.`-allowing charset: the app only calls
+`loadVolumes`, where NiiVue infers the reader from `name`, so it is unaffected,
+and `/` and `%` stay escaped either way, which is what that encoding actually
+protects against.
+
 **The document route must keep `.` unescaped.** `NVMesh.loadMesh` reads the
 reader extension from the URL and ignores the `name` passed with it, and an
 unknown extension falls back to the **MZ3 reader** — so a fully-escaped route

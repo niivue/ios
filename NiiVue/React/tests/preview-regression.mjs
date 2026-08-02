@@ -22,7 +22,7 @@ import { execFileSync } from 'node:child_process'
 import { join, extname, normalize, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
-import { nifti1, gifti, octahedron } from './preview-fixtures.mjs'
+import { SPECIMENS, nifti1, gifti, octahedron } from './preview-fixtures.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DIST = join(HERE, '..', 'dist')
@@ -40,18 +40,18 @@ async function loadPlaywright() {
 
 /** Synthetic fixtures, served under /fixtures/. See preview-fixtures.mjs. */
 const FIXTURES = {
-  'basic.nii': nifti1({ dims: [24, 28, 20], pixDims: [2, 2, 2.5] }),
+  'basic.nii': SPECIMENS.volume(),
   'series.nii': nifti1({ dims: [12, 12, 10, 7] }),
   'complex.nii': nifti1({ dims: [12, 12, 10], datatype: 32 }),
   'flat.nii': nifti1({ dims: [16, 16, 1] }),
   'empty.nii': nifti1({ dims: [0, 0, 0] }),
   // Header promises a full volume; the data stops a third of the way in.
-  'truncated.nii': nifti1({ dims: [24, 28, 20], truncateTo: 352 + 24 * 28 * 20 / 3 }),
-  'garbage.nii': Buffer.from('not a volume in any format niivue reads '.repeat(64)),
-  'surface.gii': gifti(octahedron()),
+  'truncated.nii': SPECIMENS.truncated(),
+  'garbage.nii': SPECIMENS.corrupt(),
+  'surface.gii': SPECIMENS.surface(),
   // The case the contract singles out: per-vertex values for a surface the file
   // does not contain. It must NOT send us looking for a companion.
-  'layer.gii': gifti({ scalars: [0, 1, 2, 3, 4, 5] }),
+  'layer.gii': SPECIMENS.layerOnly(),
   'garbage.mz3': Buffer.from('not a mesh '.repeat(64)),
 }
 
@@ -89,10 +89,11 @@ const MIME = {
  * use the shape the extension actually uses cannot catch that.
  */
 function documentURL(base, name) {
-  const encoded = [...name]
-    .map((c) => (/[A-Za-z0-9.]/.test(c) ? c : encodeURIComponent(c).replace(/%/g, '%')))
-    .join('')
-    .replace(/[^A-Za-z0-9.%]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
+  // Matches `registerDocument`: everything escaped except alphanumerics and `.`.
+  const encoded = name.replace(
+    /[^A-Za-z0-9.]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`,
+  )
   return `${base}/document/00000000-0000-4000-8000-000000000000/${encoded}`
 }
 
