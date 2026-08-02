@@ -21,7 +21,7 @@ import {
   type NVImage,
   type NVMesh,
 } from '@niivue/niivue'
-import { describeMesh, describeVolume } from './preview-metadata'
+import { describeMesh, describeVolume, type VolumeSummary } from './preview-metadata'
 
 /** Native → page. One request per preview; the host never sends a second. */
 export interface PreviewRequest {
@@ -252,16 +252,7 @@ async function renderMesh(instance: NiiVue, request: PreviewRequest): Promise<vo
     return
   }
 
-  const summary = describeMesh(mesh, request.displayName, request.fileSize)
-  settled = true
-  stage.loading.hidden = true
-
-  if (!summary.displayable) {
-    showMetadataOnly(request.displayName, summary.pairs, summary.reason ?? 'no geometry')
-    post({ stage: 'loaded', metadata: { ...summary.pairs, displayable: 'false' } })
-    return
-  }
-
+  present(request, describeMesh(mesh, request.displayName, request.fileSize), () => {
   // Render-only: no slice tiles, so no custom layout either.
   instance.customLayout = null
   instance.sliceType = SLICE_TYPE.RENDER
@@ -272,11 +263,9 @@ async function renderMesh(instance: NiiVue, request: PreviewRequest): Promise<vo
   // itself and washes it out. Turning them off is safe in this branch
   // precisely because there are no 2D tiles — `is3DCrosshairVisible` gates
   // every crosshair, not only the 3D one.
-  instance.is3DCrosshairVisible = false
-  instance.meshXRay = 0
-  showMetadata(request.displayName, summary.pairs)
-  instance.drawScene()
-  post({ stage: 'loaded', metadata: { ...summary.pairs, displayable: 'true' } })
+    instance.is3DCrosshairVisible = false
+    instance.meshXRay = 0
+  })
 }
 
 async function render(request: PreviewRequest): Promise<void> {
@@ -319,27 +308,65 @@ async function render(request: PreviewRequest): Promise<void> {
     return
   }
 
-  const summary = describeVolume(volume, request.displayName, request.fileSize)
+  const instance = nv
+  present(request, describeVolume(volume, request.displayName, request.fileSize), () => {
+    instance.customLayout = QUADRANTS
+    // Draw all three orientations at one physical scale rather than zooming
+    // each to fill its quadrant, so the panels are comparable.
+    instance.isEqualSize = true
+    instance.isOrientationTextVisible = true
+  })
+}
+
+/**
+ * Show a summary and post EXACTLY ONE terminal message, whatever `configure`
+ * does.
+ *
+ * `settled` used to be latched before the drawing work, so a throw in between —
+ * a lost WebGL context under memory pressure being the realistic trigger — left
+ * the host with no terminal message at all, `fail()` permanently disarmed, and
+ * a metadata strip over an empty canvas reported to Quick Look as a success.
+ * The post now happens in a `finally`, so the only question is which message,
+ * never whether there is one.
+ */
+function present(
+  request: PreviewRequest,
+  summary: VolumeSummary,
+  configure: () => void,
+): void {
+  if (settled) return
   settled = true
-  stage.loading.hidden = true
-
-  if (!summary.displayable) {
-    // A successful request that has nothing to draw. Reported as `loaded`, not
-    // `failed`: the native side would replace our panel — and its metadata —
-    // with Quick Look's generic one.
-    showMetadataOnly(request.displayName, summary.pairs, summary.reason ?? 'unsupported data')
-    post({ stage: 'loaded', metadata: { ...summary.pairs, displayable: 'false' } })
+  let drew = false
+  try {
+    stage.loading.hidden = true
+    if (summary.displayable) {
+      configure()
+      showMetadata(request.displayName, summary.pairs)
+      nv?.drawScene()
+      drew = true
+    } else {
+      // A successful request that has nothing to draw. Reported as `loaded`,
+      // not `failed`: the native side would replace our panel — and its
+      // metadata — with Quick Look's generic one.
+      showMetadataOnly(request.displayName, summary.pairs, summary.reason ?? 'unsupported data')
+    }
+  } catch (error) {
+    drew = false
+    showFallback(failureText.internal)
+    post({
+      stage: 'failed',
+      code: 'internal',
+      message: error instanceof Error ? error.message : String(error),
+    })
     return
+  } finally {
+    if (drew || !summary.displayable) {
+      post({
+        stage: 'loaded',
+        metadata: { ...summary.pairs, displayable: String(summary.displayable) },
+      })
+    }
   }
-
-  nv.customLayout = QUADRANTS
-  // Draw all three orientations at one physical scale rather than zooming each
-  // to fill its quadrant, so the panels are comparable.
-  nv.isEqualSize = true
-  nv.isOrientationTextVisible = true
-  showMetadata(request.displayName, summary.pairs)
-  nv.drawScene()
-  post({ stage: 'loaded', metadata: { ...summary.pairs, displayable: 'true' } })
 }
 
 // Installed before NiiVue is constructed so the host can always reach `fail`,

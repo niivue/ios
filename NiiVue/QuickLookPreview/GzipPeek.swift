@@ -26,9 +26,10 @@ enum GzipPeek {
     /// something we want to identify anyway.
     private static let compressedBudget = 64 * 1024
 
-    /// Inflate at most `peekBytes` from the start of a gzip member.
-    /// Returns nil if `data` is not gzip, or is truncated//corrupt.
-    static func inflatePrefix(of data: Data) -> Data? {
+    /// Offset of the raw DEFLATE payload within a gzip member, or nil if this
+    /// is not gzip. Shared so the prefix reader and the streaming size bound
+    /// agree on exactly what a gzip header is.
+    static func deflateOffset(in data: Data) -> Int? {
         var index = data.startIndex
         func take(_ n: Int) -> Data? {
             guard data.distance(from: index, to: data.endIndex) >= n else { return nil }
@@ -54,8 +55,14 @@ enum GzipPeek {
             }
         }
         if flags & 0x02 != 0, take(2) == nil { return nil } // FHCRC
+        return data.distance(from: data.startIndex, to: index)
+    }
 
-        let deflate = data[index...]
+    /// Inflate at most `peekBytes` from the start of a gzip member.
+    /// Returns nil if `data` is not gzip, or is truncated/corrupt.
+    static func inflatePrefix(of data: Data) -> Data? {
+        guard let offset = deflateOffset(in: data) else { return nil }
+        let deflate = data[data.index(data.startIndex, offsetBy: offset)...]
         guard !deflate.isEmpty else { return nil }
 
         // COMPRESSION_ZLIB is raw DEFLATE in Apple's framework, which is what a
@@ -83,6 +90,75 @@ enum GzipPeek {
         guard let compressed = try? handle.read(upToCount: compressedBudget) else { return nil }
         return inflatePrefix(of: compressed)
     }
+
+    /// True when the gzip member at `url` inflates to more than `limit` bytes.
+    ///
+    /// The format-agnostic half of the memory policy, and the only part that
+    /// covers `.mgz`, `.nrrd.gz` and `.gii.gz` — a header budget needs a parser
+    /// per format, but every one of these is a gzip member, and a bomb is a
+    /// bomb whatever is inside it. Output is inflated into one reused buffer
+    /// and discarded; only the running total is kept, so the peak cost here is
+    /// `chunkBytes`, not the payload.
+    ///
+    /// Stops the moment the limit is passed, so a 1000:1 bomb costs `limit`
+    /// bytes of work rather than the whole expansion. Compare the gzip ISIZE
+    /// trailer, which is tempting and wrong: it is modulo 2³² and describes
+    /// only the last member.
+    ///
+    /// Returns false for anything that is not gzip — uncompressed files are
+    /// already bounded by the source-size cap, since decoded ≈ bytes on disk.
+    static func inflatedSize(ofFileAt url: URL, exceeds limit: Int) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        // The header can carry an arbitrarily long FNAME/FCOMMENT, so find the
+        // payload within the same bounded window the prefix reader uses.
+        guard let head = try? handle.read(upToCount: compressedBudget),
+              let offset = deflateOffset(in: head), offset < head.count else { return false }
+
+        var stream = compression_stream(dst_ptr: UnsafeMutablePointer<UInt8>(bitPattern: 1)!,
+                                        dst_size: 0,
+                                        src_ptr: UnsafePointer<UInt8>(bitPattern: 1)!,
+                                        src_size: 0, state: nil)
+        guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE,
+                                      COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else { return false }
+        defer { compression_stream_destroy(&stream) }
+
+        var produced = 0
+        var output = [UInt8](repeating: 0, count: chunkBytes)
+        var input = head.subdata(in: (head.startIndex + offset)..<head.endIndex)
+
+        while true {
+            var status = COMPRESSION_STATUS_OK
+            var stalled = false
+            let overflowed: Bool = input.withUnsafeBytes { src -> Bool in
+                guard let srcBase = src.bindMemory(to: UInt8.self).baseAddress else { return false }
+                stream.src_ptr = srcBase
+                stream.src_size = input.count
+                repeat {
+                    let wrote: Int = output.withUnsafeMutableBufferPointer { dst -> Int in
+                        stream.dst_ptr = dst.baseAddress!
+                        stream.dst_size = dst.count
+                        status = compression_stream_process(&stream, 0)
+                        return dst.count - stream.dst_size
+                    }
+                    produced += wrote
+                    if produced > limit { return true }
+                    if status != COMPRESSION_STATUS_OK { return false }
+                    if wrote == 0 { stalled = true; return false }
+                } while stream.src_size > 0
+                return false
+            }
+            if overflowed { return true }
+            if status != COMPRESSION_STATUS_OK || stalled { return false }
+            guard let next = try? handle.read(upToCount: chunkBytes), !next.isEmpty else {
+                return false // input exhausted without passing the limit
+            }
+            input = next
+        }
+    }
+
+    /// Working buffer for the streaming inflate, in and out.
+    private static let chunkBytes = 256 * 1024
 }
 
 enum VolumeSniff {
@@ -114,7 +190,13 @@ enum VolumeSniff {
         return false
     }
 
-    /// Bytes one frame of this volume will occupy once decoded, or nil if the
+    /// True when the gzip member at `url` inflates past `limit`. Thin passthrough
+    /// so callers have one place to ask about size, whatever the format.
+    static func inflatedSizeExceeds(_ url: URL, _ limit: Int) -> Bool {
+        GzipPeek.inflatedSize(ofFileAt: url, exceeds: limit)
+    }
+
+    /// Total bytes this volume will occupy once decoded, or nil if the
     /// header is not a NIfTI we can measure.
     ///
     /// This exists because the file-size cap does **not** bound the decoded
@@ -124,10 +206,23 @@ enum VolumeSniff {
     /// before the page ever fetches the file is the only point at which a
     /// hostile one can be turned away cheaply.
     ///
-    /// Frame count is deliberately clamped to one — the preview loads frame
-    /// zero only (`limitFrames4D: 1`), so a 2000-volume time series is not
-    /// oversized by virtue of being long.
-    static func decodedFrameBytes(_ header: Data) -> Int? {
+    /// **Frames are NOT clamped to one, and that is the whole point.** The page
+    /// asks for `limitFrames4D: 1`, but NiiVue honours that lazily on exactly
+    /// one path — `volume/NVVolume.ts` bails with `if (dv.getInt32(0, true)
+    /// !== 348) return null`, so NIfTI-2, byte-swapped NIfTI-1, MGZ/NRRD/MHA
+    /// and any uncompressed volume fetched by URL decompress and allocate
+    /// **every** frame. Budgeting one frame for those was a 200× underestimate:
+    /// a NIfTI-2 claiming 512³×200 uint8 measures 128 MB per frame and 25 GiB
+    /// in total, gzips to ~25 MB, and passed both gates before this.
+    ///
+    /// There is deliberately no "one frame" variant of this. NiiVue's partial
+    /// streaming loader is **unreachable from `loadVolumes`** — the worker
+    /// fetches and decodes the whole buffer and applies the limit afterwards in
+    /// `nii2volume`, and the main-thread fallback drops the limit entirely
+    /// (`volume/loadBridge.ts`). Verified by measurement: a 2.65 MB
+    /// 128×128×64×2600 `.nii.gz` drove the content process to 5.4 GiB while
+    /// reporting "1 of 2600". So the bound is always the TOTAL.
+    static func decodedSize(_ header: Data) -> Int? {
         let bytes = [UInt8](header)
         func value(at offset: Int, width: Int, swapped: Bool) -> Int64? {
             guard bytes.count >= offset + width else { return nil }
@@ -160,6 +255,16 @@ enum VolumeSniff {
             return nil
         }
 
+        // Frames live in dim[4..6]; a 4D series multiplies the whole volume.
+        var frames: Int64 = 1
+        for axis in 4...6 {
+            guard let dim = value(at: dimBase + axis * dimWidth, width: dimWidth, swapped: swapped),
+                  dim > 0 else { break }
+            let (product, overflow) = frames.multipliedReportingOverflow(by: dim)
+            if overflow { return Int.max }
+            frames = product
+        }
+
         var voxels: Int64 = 1
         for axis in 1...3 {
             guard let dim = value(at: dimBase + axis * dimWidth, width: dimWidth, swapped: swapped),
@@ -174,9 +279,13 @@ enum VolumeSniff {
             if overflow { return Int.max }
             voxels = product
         }
-        let (bits, overflow) = voxels.multipliedReportingOverflow(by: bitpix)
-        if overflow { return Int.max }
-        let byteCount = bits / 8
-        return byteCount > Int64(Int.max) ? Int.max : Int(byteCount)
+        func byteCount(for count: Int64) -> Int {
+            let (bits, overflow) = count.multipliedReportingOverflow(by: bitpix)
+            if overflow { return Int.max }
+            let byteCount = bits / 8
+            return byteCount > Int64(Int.max) ? Int.max : Int(byteCount)
+        }
+        let (allVoxels, overflow) = voxels.multipliedReportingOverflow(by: frames)
+        return overflow ? Int.max : byteCount(for: allVoxels)
     }
 }

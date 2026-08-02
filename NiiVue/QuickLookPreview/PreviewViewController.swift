@@ -360,7 +360,7 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
             return
         }
 
-        if let failure = budgetFailure(fileSize: fileSize, header: header) {
+        if let failure = budgetFailure(fileSize: fileSize, header: header, url: url) {
             pendingFailure = failure
             log.error("refusing file: \(failure.rawValue, privacy: .public)")
         } else {
@@ -380,18 +380,33 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     /// small gzip that claims enormous dimensions, and the allocation it
     /// provokes happens inside the content process, where running out is a
     /// crash rather than an error we can report.
-    private func budgetFailure(fileSize: Int?, header: Data?) -> PreviewFailure? {
+    private func budgetFailure(fileSize: Int?, header: Data?, url: URL?) -> PreviewFailure? {
         guard let fileSize else { return .unreadable }
         if fileSize > Self.maxFileBytes { return .resourceLimit }
-        if let header, let decoded = VolumeSniff.decodedFrameBytes(header) {
+        // Two independent bounds, because neither covers the other.
+        //
+        // The header budget is exact and gives a truthful message, but needs a
+        // parser per format, so it only covers NIfTI.
+        if let header, let decoded = VolumeSniff.decodedSize(header) {
             if decoded > Self.maxDecodedBytes {
                 log.error("header claims \(decoded / (1024 * 1024)) MB decoded")
                 return .resourceLimit
             }
         }
-        // A header we cannot measure is not a pass by default — it is simply
-        // out of scope for this check, and the size cap above still applies.
+        // The inflate bound is format-agnostic and is the ONLY thing standing
+        // between a compressed MGZ/NRRD/GIFTI bomb and the content process: a
+        // 2.65 MB gzip measured at 5.4 GiB resident. It stops as soon as the
+        // limit is passed, so the cost is the limit, not the expansion.
+        if let url, VolumeSniff.inflatedSizeExceeds(url, Self.maxDecodedBytes) {
+            log.error("gzip payload exceeds the decoded budget")
+            return .resourceLimit
+        }
         return nil
+    }
+
+    private static func failed(_ message: String) -> NSError {
+        NSError(domain: "com.niivue.mobile.QuickLookPreview", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: message])
     }
 
     /// Fire the completion gate exactly once.
@@ -453,7 +468,8 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         ]
         guard let json = try? JSONSerialization.data(withJSONObject: payload),
               let text = String(data: json, encoding: .utf8) else {
-            finish(nil)
+            // `render` was never called, so the page is sitting on its spinner.
+            finish(Self.failed("The preview could not start."))
             return
         }
         // callAsyncJavaScript with an argument, never string interpolation into
@@ -484,8 +500,9 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         webView.callAsyncJavaScript(script, arguments: arguments, in: nil, in: .page) { [weak self] result in
             guard let self, self.generation == current else { return }
             if case .failure(let error) = result {
+                // The page is mid-spinner or mid-draw and will not recover.
                 log.error("page call failed: \(error.localizedDescription, privacy: .public)")
-                self.finish(nil)
+                self.finish(Self.failed("The preview could not be drawn."))
             }
         }
     }
@@ -510,11 +527,15 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         log.error("preview page failed to load: \(error.localizedDescription, privacy: .public)")
-        finish(nil)
+        // Nothing ever rendered — the container is solid black. Completing with
+        // success here hands the user a blank panel and calls it a preview.
+        finish(Self.failed("The preview could not be loaded."))
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         log.error("preview content process terminated")
-        finish(nil)
+        // This is where a resource-limit kill lands. The web view is blank, so
+        // the only honest answer to Quick Look is an error.
+        finish(Self.failed("The preview ran out of resources."))
     }
 }

@@ -855,6 +855,35 @@ real NIfTI, NRRD, MetaImage, MGH/MGZ, GIFTI, MZ3 and TCK content, and the set is
 split into `good/` and `bad/` at the owner's suggestion, each with a README
 stating its rule, so a spacebar sweep needs no lookup table.
 
+## Audit round 5 — the first review of the Quick Look work (2026-08-01)
+
+Full detail in `audit_response.md`. The headline is that **two of the round's
+own "fixes" were themselves the bugs**, which is the pattern this repo keeps
+reproducing:
+
+- Milestone 7's decoded-byte budget clamped frames to one on the strength of
+  `limitFrames4D: 1`. That clamp was a 200–2000× underestimate, because NiiVue
+  applies the limit only after decoding everything. A 2.65 MB file measured at
+  5.4 GiB resident.
+- Milestone 1's exit gate checked that the iOS builds *succeeded*, never that
+  the appex stayed out of them. It had been shipping inside the iOS device and
+  simulator apps ever since.
+- Milestone 3's readiness timeout checked only for an outstanding completion,
+  making it a hard 10 s deadline on the whole preview and rendering the 20 s
+  load timeout — and `PreviewFailure.timeout` — permanently unreachable.
+
+Fixed this round: the frame clamp (now total, plus a format-agnostic native
+inflate bound), the iOS embed (`platformFilter = maccatalyst`), the readiness
+timer, four `finish(nil)` sites that reported success over a blank panel, a page
+path that could post *no* terminal message at all, and the routing harness'
+dependency on a private fixture package.
+
+Open and owner-facing: an oversize legitimate 4D series is now refused rather
+than shown at frame zero — raise the cap on measured device headroom, or route
+it to the metadata-only panel. Teardown still does not release the NiiVue
+instance or the `WKWebView`. Script messages are still the one async channel
+without a generation stamp.
+
 ## Regression coverage added for Milestones 3–5, 7
 
 `NiiVue/React/tests/preview-regression.mjs`, run with `npm run test:preview`.

@@ -373,6 +373,24 @@ if (!existsSync(LFS_MESHES)) {
   }
 }
 
+// --- 11b. A throw mid-draw must still produce ONE terminal message ---------
+// The suite tested "at most one" but not "at least one". `settled` used to be
+// latched before the drawing work, so a throw in between posted nothing at all,
+// permanently disarmed fail(), and left the host completing a blank panel as a
+// success. Injected here by removing the canvas the draw path writes to.
+page = await openPreview()
+await page.evaluate(() => document.getElementById('gl').remove())
+await page.evaluate(
+  (u) => window.niivuePreview.render({ url: u, displayName: 'basic.nii', family: 'volume' }),
+  documentURL(base, 'basic.nii'),
+)
+const afterThrow = (await page.evaluate(() => window.__posted)).filter(
+  (m) => m.stage === 'loaded' || m.stage === 'failed',
+)
+check('a throw mid-draw still posts exactly one terminal message', afterThrow.length === 1, `${afterThrow.length}`)
+check('and it is not reported as a success', afterThrow[0]?.stage === 'failed', afterThrow[0]?.stage)
+await page.close()
+
 // --- 12. Rotatable and resizable ------------------------------------------
 result = await preview(documentURL(base, 'surface.gii'), 'surface.gii', { family: 'mesh' })
 page = result.page

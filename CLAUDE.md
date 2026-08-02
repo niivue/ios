@@ -562,6 +562,18 @@ separate from `test:bridge` because the two pages share no code. The mesh and
 tract checks read real files from the private Git-LFS `dev-images` package by
 absolute path and print `SKIP` when it is absent.
 
+**`limitFrames4D` bounds RETENTION, not decoding.** NiiVue's partial streaming
+loader is unreachable from `loadVolumes` for every format — the worker fetches
+and decodes the whole buffer and truncates afterwards, and the main-thread
+fallback drops the limit entirely. Measured: a 2.65 MB 4D `.nii.gz` drove the
+content process to 5.4 GiB while the strip read "1 of 2600". The extension
+therefore budgets the **total** decoded size (`VolumeSniff.decodedSize`, all of
+dim[4..6]) AND streams the gzip natively to a byte budget
+(`GzipPeek.inflatedSize(ofFileAt:exceeds:)`). Both are needed: the header budget
+misses a small header with a huge payload, and the inflate bound is the only
+cover for `.mgz`/`.nrrd.gz`/`.gii.gz`, which have no header parser here. Do not
+"simplify" either away, and do not restore the one-frame clamp.
+
 **The Quick Look extension must be embedded for Catalyst ONLY.** Its
 `SUPPORTED_PLATFORMS` has to stay `iphoneos iphonesimulator` — a Catalyst build
 *is* an iOS build — so the restriction lives as `platformFilter = maccatalyst`
