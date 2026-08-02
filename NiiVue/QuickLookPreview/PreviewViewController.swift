@@ -48,7 +48,7 @@ private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
-class PreviewViewController: UIViewController, QLPreviewingController, WKScriptMessageHandler, WKNavigationDelegate {
+class PreviewViewController: UIViewController, QLPreviewingController, WKScriptMessageHandler, WKNavigationDelegate, UIGestureRecognizerDelegate {
 
     /// Files arriving as plain gzip. See `disposition(for:)`.
     private static let gzipType = "org.gnu.gnu-zip-archive"
@@ -56,6 +56,9 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     private static let readinessTimeout: TimeInterval = 10
     /// The page came up but never finished with the document.
     private static let loadTimeout: TimeInterval = 20
+    /// How long the page gets to draw its own timeout panel before the native
+    /// side stops waiting for it.
+    private static let timeoutGrace: TimeInterval = 2
     /// Bytes on disk. An unreadable size fails closed rather than passing the
     /// cap as zero.
     private static let maxFileBytes = 256 * 1024 * 1024
@@ -98,6 +101,10 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     /// True only when `startAccessingSecurityScopedResource` returned true, so
     /// the balancing `stop` is never called spuriously.
     private var scopedURL: URL?
+    /// Set when the page reports `ready`, cleared by teardown. Separates "the
+    /// shell never came up" from "the shell is up and the file is slow" — two
+    /// failures with different deadlines and different remedies.
+    private var pageIsReady = false
     /// `preparePreviewOfFile` entry. The exit gate is measured from here to the
     /// page's `loaded`, and cold extension launch is reported separately
     /// because it is not ours to fix — see `processStart`.
@@ -148,8 +155,47 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         webView.scrollView.isScrollEnabled = false
         // A preview is not a browser: no swipe-back, no link navigation.
         webView.allowsBackForwardNavigationGestures = false
-        view = webView
+
+        // The root view handed to Quick Look is an opaque container, not the web
+        // view itself, and it carries a pan recognizer that claims drags.
+        //
+        // A Quick Look panel is movable by its background. On Catalyst the
+        // decision is made by the host's AppKit window, out of our process, so
+        // the only lever we have is to make the gesture unambiguously ours:
+        // UIKit claims the sequence, and `cancelsTouchesInView = false` means
+        // the web view still receives every event, so NiiVue's rotation and
+        // crosshair tracking are untouched.
+        //
+        // UNVERIFIED from here — it cannot be exercised without Finder, and two
+        // earlier attempts at this symptom (preventDefault in the page, then
+        // `isOpaque`) were each necessary but not sufficient. Both are kept
+        // because they fixed real, separate problems.
+        let container = UIView()
+        container.isOpaque = true
+        container.backgroundColor = .black
+        webView.frame = container.bounds
+        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.addSubview(webView)
+
+        let claim = UIPanGestureRecognizer(target: self, action: #selector(absorbDrag(_:)))
+        claim.cancelsTouchesInView = false
+        claim.delaysTouchesBegan = false
+        claim.delaysTouchesEnded = false
+        claim.delegate = self
+        container.addGestureRecognizer(claim)
+
+        view = container
     }
+
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    /// Intentionally empty: the recognizer exists to claim the drag for UIKit,
+    /// not to act on it. NiiVue does the actual work from its own pointer
+    /// events, which still arrive because the recognizer cancels nothing.
+    @objc private func absorbDrag(_ recognizer: UIPanGestureRecognizer) {}
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -182,6 +228,7 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         finish(nil)
         request = nil
         pendingFailure = nil
+        pageIsReady = false
         webView?.stopLoading()
         // Dropping the token first means an in-flight page cannot start a new
         // read of the file we are about to release.
@@ -278,7 +325,17 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.readinessTimeout) { [weak self] in
-            guard let self, self.generation == current, self.completion != nil else { return }
+            // `pageIsReady`, not just `completion != nil`. The shell reporting
+            // `ready` is what this timer is waiting for; once that has happened
+            // a slow *load* is the load timeout's business. Checking only for an
+            // outstanding completion killed any legitimate render still running
+            // at ten seconds and told the user the preview "could not start".
+            guard let self, self.generation == current, !self.pageIsReady,
+                  self.completion != nil else { return }
+            // Invalidate first: Quick Look is about to be told this preview
+            // failed, so a header read still in flight must not come back and
+            // start loading the document into a request nobody is waiting for.
+            self.generation &+= 1
             // The shell itself never came up, so there is no fallback panel to
             // show the failure in. Completing with an error hands Quick Look
             // back its own panel, which beats an indefinite spinner.
@@ -354,6 +411,7 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
 
         switch stage {
         case "ready":
+            pageIsReady = true
             dispatchRequest()
         case "loaded":
             // The Milestone 7 gate, reported at the one point that can measure
@@ -407,6 +465,17 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
             // The shell is up, so the page can explain this itself.
             log.error("document load timed out")
             self.call("await window.niivuePreview.fail(code);", ["code": PreviewFailure.timeout.rawValue])
+            // Asking the page to explain itself only works if the page is
+            // alive. A hung or jetsammed content process will never run that
+            // call and never post `failed`, which left the completion pending
+            // for good. Complete natively if the page has not answered shortly.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.timeoutGrace) { [weak self] in
+                guard let self, self.generation == current, self.completion != nil else { return }
+                log.error("page did not answer the timeout; completing natively")
+                self.finish(NSError(domain: "com.niivue.mobile.QuickLookPreview", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "The preview timed out.",
+                ]))
+            }
         }
     }
 

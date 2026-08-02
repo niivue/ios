@@ -30,8 +30,14 @@ if (!dir) {
 mkdirSync(join(dir, 'good'), { recursive: true })
 mkdirSync(join(dir, 'bad'), { recursive: true })
 
-/** Real tract fixtures whose containers are impractical to synthesise. */
-const LFS = '/Users/chris/src/mono/packages/dev-images/images/meshes'
+/**
+ * Real tract fixtures whose containers are impractical to synthesise. The path
+ * is a developer convenience, not a release dependency: override it with
+ * NIIVUE_DEV_IMAGES, and when it is absent the fixtures are simply not written
+ * and no expectation row is emitted for them.
+ */
+const LFS =
+  process.env.NIIVUE_DEV_IMAGES ?? '/Users/chris/src/mono/packages/dev-images/images/meshes'
 const BORROWED = [
   ['tracts.trk', 'tract.IFOF_R.trk'],
   ['tracts.trx', 'colby.trx'],
@@ -78,7 +84,12 @@ for (const [name, source] of BORROWED) {
     copyFileSync(from, join(dir, 'good', name))
     rows.push([`good/${name}`, 'yes', 'yes'])
   } else {
-    rows.push([`good/${name}`, 'yes', 'skip'])
+    // Deliberately NO expectation row: the shell script cross-checks the number
+    // of resolved files against the number of rows, so claiming a fixture that
+    // was never written turns an absent optional dependency into a hard
+    // "UTI probe failed". Announce it on stderr instead, where it is visible
+    // without being mistaken for coverage.
+    process.stderr.write(`  skipped ${name}: ${from} not present\n`)
   }
 }
 

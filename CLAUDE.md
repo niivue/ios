@@ -562,6 +562,22 @@ separate from `test:bridge` because the two pages share no code. The mesh and
 tract checks read real files from the private Git-LFS `dev-images` package by
 absolute path and print `SKIP` when it is absent.
 
+**The Quick Look extension must be embedded for Catalyst ONLY.** Its
+`SUPPORTED_PLATFORMS` has to stay `iphoneos iphonesimulator` — a Catalyst build
+*is* an iOS build — so the restriction lives as `platformFilter = maccatalyst`
+on both the embed `PBXBuildFile` and the `PBXTargetDependency` in
+`project.pbxproj`. Without it the appex ships inside the iOS device and
+simulator apps, which silently enables the deferred iOS Files preview surface
+and its broad gzip claim. Verify with `ls NiiVue.app/PlugIns` on an iOS build:
+the directory must not exist.
+
+**The readiness timeout must check `pageIsReady`, not just an outstanding
+completion.** Those are two different failures — "the shell never came up"
+(10 s, complete with an error so Quick Look shows its own panel) versus "the
+shell is up and the file is slow" (20 s, ask the page to explain itself, with a
+2 s native backstop because a hung content process cannot answer). Checking only
+`completion != nil` killed legitimate slow renders at ten seconds.
+
 **The document route must keep `.` unescaped.** `NVMesh.loadMesh` reads the
 reader extension from the URL and ignores the `name` passed with it, and an
 unknown extension falls back to the **MZ3 reader** — so a fully-escaped route

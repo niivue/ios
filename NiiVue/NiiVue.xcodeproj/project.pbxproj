@@ -21,7 +21,7 @@
 		QL00000000000000000012 /* GzipPeek.swift in Sources */ = {isa = PBXBuildFile; fileRef = QL00000000000000000006 /* GzipPeek.swift */; };
 		QL00000000000000000013 /* PreviewSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = QL00000000000000000007 /* PreviewSchemeHandler.swift */; };
 		QL00000000000000000015 /* dist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 3485664C2B5426A4008EF4DD /* dist */; };
-		QL00000000000000000014 /* QuickLookPreview.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = QL00000000000000000004 /* QuickLookPreview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		QL00000000000000000014 /* QuickLookPreview.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = QL00000000000000000004 /* QuickLookPreview.appex */; platformFilter = maccatalyst; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -484,6 +484,7 @@
 /* Begin PBXTargetDependency section */
 		QL00000000000000000022 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = maccatalyst;
 			target = QL00000000000000000003 /* QuickLookPreview */;
 			targetProxy = QL00000000000000000021 /* PBXContainerItemProxy */;
 		};

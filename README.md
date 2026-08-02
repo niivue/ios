@@ -235,8 +235,19 @@ check is what stops a small file with impossible dimensions.
 #### Non-NIfTI `.gz` files
 
 Because macOS resolves a file's type from its last extension only, `.nii.gz` can
-reach the extension only by claiming generic gzip. Any other `.gz` — a tarball,
-say — is handed straight back, so it keeps whatever preview it had.
+reach the extension only by claiming generic gzip. Every `.gz` on the machine
+therefore reaches this extension, which reads the gzip header, checks whether
+the payload is a NIfTI, and returns an error for anything else so that Finder
+falls back to another preview provider.
+
+Note that error-driven fallback is not documented behaviour: Apple specifies the
+completion handler as the signal that the view is ready, not as a way to decline
+in favour of another provider. Returning an error is what the two comparable
+tools (NIfTIViewQL, MIQ) do and they are in shipping use, but whether a foreign
+archive keeps its previous preview has **not** been verified here against a
+clean install with a competing archive previewer installed. If it turns out that
+a `.gz` loses its normal preview, the honest options are to document the
+takeover or to drop `.nii.gz` support — not to leave this paragraph as it is.
 
 #### Troubleshooting
 
