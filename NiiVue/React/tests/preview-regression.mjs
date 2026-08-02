@@ -391,6 +391,29 @@ check('a throw mid-draw still posts exactly one terminal message', afterThrow.le
 check('and it is not reported as a success', afterThrow[0]?.stage === 'failed', afterThrow[0]?.stage)
 await page.close()
 
+// The same injection against a NON-displayable fixture. This is the case the
+// check above cannot see: `present` used to post from a `finally`, and a
+// `return` from the catch still runs one, so the metadata-only branch posted
+// `failed` and then `loaded` on top of it — two terminal messages, the second
+// of which reached the native "preview loaded in N ms" timing log.
+for (const file of ['truncated.nii', 'layer.gii']) {
+  page = await openPreview()
+  await page.evaluate(() => document.getElementById('gl').remove())
+  await page.evaluate(
+    ([u, n, f]) => window.niivuePreview.render({ url: u, displayName: n, family: f }),
+    [documentURL(base, file), file, file.endsWith('.gii') ? 'mesh' : 'volume'],
+  )
+  const terminals = (await page.evaluate(() => window.__posted)).filter(
+    (m) => m.stage === 'loaded' || m.stage === 'failed',
+  )
+  check(
+    `${file} posts exactly one terminal message when the draw throws`,
+    terminals.length === 1,
+    terminals.map((m) => m.stage).join(', '),
+  )
+  await page.close()
+}
+
 // --- 12. Rotatable and resizable ------------------------------------------
 result = await preview(documentURL(base, 'surface.gii'), 'surface.gii', { family: 'mesh' })
 page = result.page
@@ -404,22 +427,11 @@ for (let i = 1; i <= 10; i++) {
 await page.mouse.up()
 await page.waitForTimeout(300)
 const after = (await page.locator('#gl').screenshot({ type: 'png' })).toString('base64')
-check('a drag orbits the render', before !== after)
-
-// The rotation above must not ALSO reach the host. An unclaimed pointerdown
-// lets AppKit drag the Quick Look panel by its background and lets WebKit start
-// a selection — the panel jitters and turns blue. NiiVue never calls
-// preventDefault itself, so the page has to.
-const claimed = await page.evaluate(() => {
-  let prevented = null
-  const probe = (e) => { prevented = e.defaultPrevented }
-  const gl = document.getElementById('gl')
-  gl.addEventListener('pointerdown', probe)
-  gl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }))
-  gl.removeEventListener('pointerdown', probe)
-  return prevented
-})
-check('the page claims the drag instead of the host', claimed === true, `defaultPrevented=${claimed}`)
+// `before === after` alone is vacuous — a blank, black or crashed canvas
+// satisfies it trivially, which is the "test shaped so it cannot fail" pattern
+// this plan calls out three times. Pair it with proof the canvas is still lit.
+const stillLit = (await quadrantPixels(page)).reduce((a, b) => a + b)
+check('a primary drag leaves the preview static', before === after && stillLit > 500, `${stillLit} lit px`)
 
 // Finder resizes the panel freely; the drawing buffer must follow, or the
 // render is upscaled and soft.

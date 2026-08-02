@@ -15,13 +15,8 @@
         height: 100%;
         background: #000;
         overflow: hidden;
-        /* A rotate-drag on the canvas is an ordinary mouse drag as far as
-           WebKit is concerned — NiiVue's pointerdown handler does not
-           preventDefault (`control/interactions.ts`), so once the drag travels
-           far enough WebKit starts a document selection. A selected <canvas> is
-           painted with the translucent system selection colour over its whole
-           box, so the entire panel — mesh, black background and all — turns
-           blue and stays that way. There is nothing here worth selecting. */
+        /* A primary drag moves the Quick Look window. Keep the document out of
+           WebKit's text-selection path while that native gesture is active. */
         -webkit-user-select: none;
         user-select: none;
         font: 12px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
@@ -29,7 +24,10 @@
       }
       #shell { display: flex; flex-direction: column; height: 100%; }
       #stage { position: relative; flex: 1 1 auto; min-height: 0; }
-      canvas { display: block; width: 100%; height: 100%; }
+      /* Catalyst's Quick Look host also treats a primary canvas drag as a window
+         drag. Let only the host handle it; sending the same sequence to NiiVue
+         makes the moving coordinate space produce uncontrolled rotation. */
+      canvas { display: block; width: 100%; height: 100%; pointer-events: none; }
 
       /* Centred overlays share a stacking slot; only one is ever visible. */
       .overlay {

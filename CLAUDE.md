@@ -583,6 +583,19 @@ simulator apps, which silently enables the deferred iOS Files preview surface
 and its broad gzip claim. Verify with `ls NiiVue.app/PlugIns` on an iOS build:
 the directory must not exist.
 
+**Every budget decision happens OFF the main queue.** `budgetFailure` is
+`static` and is called from the background block in `preparePreviewOfFile`, not
+from `begin`. The inflate bound streams up to the whole payload — measured at
+738 ms for a legitimate 178 MB volume — so on the main queue it blocks the
+readiness timer and dismissal and blows the ≤2 s gate before the page even
+starts loading. This was regressed once already; keep the call site off-main.
+
+**A cancelled navigation must be matched against `currentNavigation`.**
+`stopLoading()` reports the previous page's cancellation *asynchronously*, after
+the next request's completion is installed, so an unguarded
+`didFailProvisionalNavigation` fails each preview with the one before it —
+visible as every file failing while arrowing through a folder in Finder.
+
 **The readiness timeout must check `pageIsReady`, not just an outstanding
 completion.** Those are two different failures — "the shell never came up"
 (10 s, complete with an error so Quick Look shows its own panel) versus "the
@@ -612,24 +625,23 @@ are still escaped, which is what that encoding was actually protecting against.
 `public.zip-archive`/`org.gnu.gnu-zip-archive` — otherwise macOS offers to
 "Uncompress" them. Same reason `.docx`, `.jar` and `.epub` do not.
 
-**`webView.isOpaque = true` in the extension**, unlike the host app. A Quick
-Look panel is movable by its background, and a non-opaque web view lets a drag
-read as a window drag.
+**`webView.isOpaque = true` in the extension**, unlike the host app. The preview
+page is solid black and has no SwiftUI background to reveal. This is a rendering
+hint, not the window-drag fix.
 
-**The preview page must claim pointer gestures itself.** NiiVue's `pointerdown`
-never calls `preventDefault`, and a Quick Look panel is movable by its
-background, so an unclaimed drag both moves the window (with jitter, as NiiVue
-tracks a pointer whose window is sliding) and starts a text selection. The page
-adds a capture-phase `preventDefault` on the canvas *and* sets `user-select:
-none` — two different default actions, two fixes. Safe because NiiVue binds only
-pointer events there, never mouse events.
+**Quick Look previews are static on Mac Catalyst.** The host treats a primary
+drag over remote Catalyst content as a window drag. NiiVue also handling that
+sequence makes rotation jitter because its coordinate space moves underneath
+the pointer. `quicklook.html` therefore sets `pointer-events: none` on the canvas:
+the window moves smoothly and the rendering stays fixed. A full-view UIKit pan,
+capture-phase `preventDefault`, opacity, and `-webkit-app-region: no-drag` were
+each insufficient to stop the cross-process AppKit gesture. Smooth interactive
+rotation would require a native AppKit Quick Look target, not another gesture
+layer in this Catalyst example.
 
-**`quicklook.html` sets `user-select: none` on purpose.** Without it, a
-rotate-drag becomes a WebKit text selection — NiiVue's `pointerdown` does not
-`preventDefault` — and a selection touching the canvas paints the translucent
-system selection colour over its whole box, turning the entire panel blue until
-the next click. Do not "restore" selectability; the strip's values reach
-VoiceOver through `aria-label` instead.
+**`quicklook.html` sets `user-select: none` on purpose.** A primary drag belongs
+to the native window, not to WebKit text selection. The strip's values still
+reach VoiceOver through `aria-label`.
 
 **`attachToCanvas` replaces the canvas element** — NiiVue `cloneNode(false)`s it
 and calls `replaceChild`, so a reference taken before attaching is detached from

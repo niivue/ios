@@ -48,7 +48,7 @@ private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
-class PreviewViewController: UIViewController, QLPreviewingController, WKScriptMessageHandler, WKNavigationDelegate, UIGestureRecognizerDelegate {
+class PreviewViewController: UIViewController, QLPreviewingController, WKScriptMessageHandler, WKNavigationDelegate {
 
     /// Files arriving as plain gzip. See `disposition(for:)`.
     private static let gzipType = "org.gnu.gnu-zip-archive"
@@ -105,6 +105,12 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     /// shell never came up" from "the shell is up and the file is slow" — two
     /// failures with different deadlines and different remedies.
     private var pageIsReady = false
+    /// The navigation this preview started. `stopLoading()` reports the
+    /// previous page's cancellation *asynchronously*, by which time the next
+    /// request's completion is already installed — so a failure that does not
+    /// belong to the current navigation must be ignored, or arrowing through a
+    /// folder in Finder fails each preview with the one before it.
+    private var currentNavigation: WKNavigation?
     /// `preparePreviewOfFile` entry. The exit gate is measured from here to the
     /// page's `loaded`, and cold extension launch is reported separately
     /// because it is not ours to fix — see `processStart`.
@@ -140,15 +146,8 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
 
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
-        // OPAQUE, unlike the host app's web view.
-        //
-        // The app sets `isOpaque = false` so its SwiftUI background shows
-        // through; Milestone 2 copied that here, where it is actively harmful.
-        // A Quick Look panel is movable by its background, and a non-opaque view
-        // lets a click read as landing on that background — so a rotate-drag
-        // moved the whole window, and NiiVue kept tracking a pointer whose
-        // window was sliding out from under it, which is the jitter. The page is
-        // solid black regardless, so nothing is lost by owning every pixel.
+        // Opaque, unlike the host app's web view: this page is solid black and
+        // has no SwiftUI background to reveal. Opacity is only a rendering hint.
         webView.isOpaque = true
         webView.backgroundColor = .black
         webView.scrollView.bounces = false
@@ -156,46 +155,8 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         // A preview is not a browser: no swipe-back, no link navigation.
         webView.allowsBackForwardNavigationGestures = false
 
-        // The root view handed to Quick Look is an opaque container, not the web
-        // view itself, and it carries a pan recognizer that claims drags.
-        //
-        // A Quick Look panel is movable by its background. On Catalyst the
-        // decision is made by the host's AppKit window, out of our process, so
-        // the only lever we have is to make the gesture unambiguously ours:
-        // UIKit claims the sequence, and `cancelsTouchesInView = false` means
-        // the web view still receives every event, so NiiVue's rotation and
-        // crosshair tracking are untouched.
-        //
-        // UNVERIFIED from here — it cannot be exercised without Finder, and two
-        // earlier attempts at this symptom (preventDefault in the page, then
-        // `isOpaque`) were each necessary but not sufficient. Both are kept
-        // because they fixed real, separate problems.
-        let container = UIView()
-        container.isOpaque = true
-        container.backgroundColor = .black
-        webView.frame = container.bounds
-        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        container.addSubview(webView)
-
-        let claim = UIPanGestureRecognizer(target: self, action: #selector(absorbDrag(_:)))
-        claim.cancelsTouchesInView = false
-        claim.delaysTouchesBegan = false
-        claim.delaysTouchesEnded = false
-        claim.delegate = self
-        container.addGestureRecognizer(claim)
-
-        view = container
+        view = webView
     }
-
-    func gestureRecognizer(_ recognizer: UIGestureRecognizer,
-                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        true
-    }
-
-    /// Intentionally empty: the recognizer exists to claim the drag for UIKit,
-    /// not to act on it. NiiVue does the actual work from its own pointer
-    /// events, which still arrive because the recognizer cancels nothing.
-    @objc private func absorbDrag(_ recognizer: UIPanGestureRecognizer) {}
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -229,6 +190,7 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         request = nil
         pendingFailure = nil
         pageIsReady = false
+        currentNavigation = nil
         webView?.stopLoading()
         // Dropping the token first means an in-flight page cannot start a new
         // read of the file we are about to release.
@@ -318,9 +280,15 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
             // Fails closed: an unreadable size refuses the file rather than
             // passing the cap as zero.
             let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+            // Decided here, NOT in `begin`: the inflate bound streams up to the
+            // whole payload, measured at 738 ms for a legitimate 178 MB volume.
+            // On the main queue that blocks the readiness timer and dismissal
+            // and blows the ≤2 s gate before the page has even started loading.
+            let failure = Self.budgetFailure(fileSize: size, header: header, url: url)
             DispatchQueue.main.async {
                 guard let self, self.generation == current else { return }
-                self.begin(url: url, type: type, header: header, fileSize: size)
+                self.begin(url: url, type: type, header: header,
+                           fileSize: size, failure: failure)
             }
         }
 
@@ -332,10 +300,6 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
             // at ten seconds and told the user the preview "could not start".
             guard let self, self.generation == current, !self.pageIsReady,
                   self.completion != nil else { return }
-            // Invalidate first: Quick Look is about to be told this preview
-            // failed, so a header read still in flight must not come back and
-            // start loading the document into a request nobody is waiting for.
-            self.generation &+= 1
             // The shell itself never came up, so there is no fallback panel to
             // show the failure in. Completing with an error hands Quick Look
             // back its own panel, which beats an indefinite spinner.
@@ -343,12 +307,18 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
             self.finish(NSError(domain: "com.niivue.mobile.QuickLookPreview", code: 2, userInfo: [
                 NSLocalizedDescriptionKey: "The preview could not start.",
             ]))
+            // Then release, rather than merely invalidating: bumping the
+            // generation by hand stopped stale work from landing but left the
+            // security scope, the document token and the request alive for a
+            // preview Quick Look has already been told failed.
+            self.teardown(reason: .timeout)
         }
     }
 
     /// Main-queue continuation of `preparePreviewOfFile`, once the header has
     /// been read off it.
-    private func begin(url: URL, type: String, header: Data?, fileSize: Int?) {
+    private func begin(url: URL, type: String, header: Data?,
+                       fileSize: Int?, failure: PreviewFailure?) {
         guard disposition(for: url, type: type, header: header) == .render else {
             // Declining, rather than drawing our own panel over someone else's
             // archive, is what NIfTIViewQL does and it is the better citizen:
@@ -360,7 +330,7 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
             return
         }
 
-        if let failure = budgetFailure(fileSize: fileSize, header: header, url: url) {
+        if let failure {
             pendingFailure = failure
             log.error("refusing file: \(failure.rawValue, privacy: .public)")
         } else {
@@ -370,7 +340,7 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
                                      documentURL: schemeHandler.registerDocument(url, fileName: url.lastPathComponent))
         }
 
-        webView.load(URLRequest(url: PreviewSchemeHandler.pageURL()))
+        currentNavigation = webView.load(URLRequest(url: PreviewSchemeHandler.pageURL()))
     }
 
     /// Why this file must not be handed to the page, if it must not be.
@@ -380,15 +350,15 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     /// small gzip that claims enormous dimensions, and the allocation it
     /// provokes happens inside the content process, where running out is a
     /// crash rather than an error we can report.
-    private func budgetFailure(fileSize: Int?, header: Data?, url: URL?) -> PreviewFailure? {
+    private static func budgetFailure(fileSize: Int?, header: Data?, url: URL?) -> PreviewFailure? {
         guard let fileSize else { return .unreadable }
-        if fileSize > Self.maxFileBytes { return .resourceLimit }
+        if fileSize > maxFileBytes { return .resourceLimit }
         // Two independent bounds, because neither covers the other.
         //
         // The header budget is exact and gives a truthful message, but needs a
         // parser per format, so it only covers NIfTI.
         if let header, let decoded = VolumeSniff.decodedSize(header) {
-            if decoded > Self.maxDecodedBytes {
+            if decoded > maxDecodedBytes {
                 log.error("header claims \(decoded / (1024 * 1024)) MB decoded")
                 return .resourceLimit
             }
@@ -397,7 +367,10 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         // between a compressed MGZ/NRRD/GIFTI bomb and the content process: a
         // 2.65 MB gzip measured at 5.4 GiB resident. It stops as soon as the
         // limit is passed, so the cost is the limit, not the expansion.
-        if let url, VolumeSniff.inflatedSizeExceeds(url, Self.maxDecodedBytes) {
+        // NOT redundant with the header budget above, even for NIfTI: a valid
+        // 2×2×2 header followed by a 900 MB payload passes that check and is
+        // caught only here. Verified with exactly that fixture.
+        if let url, VolumeSniff.inflatedSizeExceeds(url, maxDecodedBytes) {
             log.error("gzip payload exceeds the decoded budget")
             return .resourceLimit
         }
@@ -457,6 +430,11 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         let current = generation
         if let failure = pendingFailure {
             call("await window.niivuePreview.fail(code);", ["code": failure.rawValue])
+            // Same backstop as the load path. This branch used to return before
+            // arming any timer, and the readiness timer has already stood down
+            // by now, so a page that ran `fail()` but could not post left the
+            // completion pending for good.
+            armCompletionBackstop(after: Self.timeoutGrace, generation: current)
             return
         }
         guard let request else { return }
@@ -485,13 +463,20 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
             // alive. A hung or jetsammed content process will never run that
             // call and never post `failed`, which left the completion pending
             // for good. Complete natively if the page has not answered shortly.
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.timeoutGrace) { [weak self] in
-                guard let self, self.generation == current, self.completion != nil else { return }
-                log.error("page did not answer the timeout; completing natively")
-                self.finish(NSError(domain: "com.niivue.mobile.QuickLookPreview", code: 3, userInfo: [
-                    NSLocalizedDescriptionKey: "The preview timed out.",
-                ]))
-            }
+            self.armCompletionBackstop(after: Self.timeoutGrace, generation: current)
+        }
+    }
+
+    /// Complete natively if the page has not answered by `delay`. Asking the
+    /// page to explain itself only works while the page is alive; a hung or
+    /// jetsammed content process never runs the call and never posts.
+    private func armCompletionBackstop(after delay: TimeInterval, generation current: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.generation == current, self.completion != nil else { return }
+            log.error("page did not answer; completing natively")
+            self.finish(NSError(domain: "com.niivue.mobile.QuickLookPreview", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "The preview timed out.",
+            ]))
         }
     }
 
@@ -526,8 +511,9 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        guard navigation === currentNavigation else { return }
         log.error("preview page failed to load: \(error.localizedDescription, privacy: .public)")
-        // Nothing ever rendered — the container is solid black. Completing with
+        // Nothing ever rendered — the view is solid black. Completing with
         // success here hands the user a blank panel and calls it a preview.
         finish(Self.failed("The preview could not be loaded."))
     }

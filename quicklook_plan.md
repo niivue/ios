@@ -12,8 +12,11 @@ handler.
   `UIViewController` and `QLPreviewingController`.
 - Host a minimal offline NiiVue page in `WKWebView`. Reuse the host app's scoped
   scheme transport; do not revive a base64 file bridge.
-- Permit viewing interactions only: resize, orbit, zoom, slice scrolling, and
-  crosshair movement. Exclude drawing, saving, settings, menus, and links.
+- **AMENDED 2026-08-01: the preview is static.** The original contract read
+  "permit viewing interactions only: resize, orbit, zoom, slice scrolling, and
+  crosshair movement". On Mac Catalyst that is not achievable — see the
+  interaction decision below. Resize still works; pointer interaction does not.
+  Drawing, saving, settings, menus and links remain excluded as before.
 - Show voxel data as equal-size Axial, Coronal, Sagittal, and Render quadrants.
   Use neurological orientation and an initially centered crosshair.
 - Overlay compact technical metadata: format, dimensions, voxel spacing and
@@ -854,6 +857,37 @@ half of the exit gate could not be observed at all. The generator now writes
 real NIfTI, NRRD, MetaImage, MGH/MGZ, GIFTI, MZ3 and TCK content, and the set is
 split into `good/` and `bad/` at the owner's suggestion, each with a README
 stating its rule, so a spacebar sweep needs no lookup table.
+
+## Interaction: the preview is STATIC on Catalyst (decided 2026-08-01)
+
+A primary drag over remote Catalyst content is claimed by the host as a window
+drag, cross-process, before our view sees it. Four attempts failed to take it
+back:
+
+| Attempt | Result |
+| --- | --- |
+| capture-phase `preventDefault` on `pointerdown` | fixed the *selection tint* (a separate, real bug) — no effect on the window drag |
+| `webView.isOpaque = true` | no effect; kept anyway as a correct rendering hint |
+| opaque container `UIView` + full-view `UIPanGestureRecognizer` with `cancelsTouchesInView = false` | no effect |
+| `-webkit-app-region: no-drag` | no effect (Electron-only) |
+
+With NiiVue *also* tracking the pointer, the two fight over one delta and the
+render jitters while the window slides. The resolution is to stop competing:
+`quicklook.html` sets `pointer-events: none` on the canvas, so the window drags
+smoothly and the image stays put. The UIKit gesture recognizer and the page's
+`preventDefault` were removed as dead weight once the canvas stopped receiving
+events; `user-select: none` stays, because a primary drag belongs to the window
+rather than to WebKit text selection.
+
+**Interactive rotation would require a native AppKit `QLPreviewingController`
+target rather than a Catalyst one.** That is a plan-level change, not another
+gesture layer. Recorded here so the next person does not re-run the same four
+experiments.
+
+Consequence for the record: the Milestone 5 exit gate "every mesh/tract fixture
+is visible, centred, and interactively rotatable" is met only in its first two
+thirds. Rotation was verified in the headless harness, where the host window
+does not exist; it is not available in Finder.
 
 ## Audit round 5 — the first review of the Quick Look work (2026-08-01)
 

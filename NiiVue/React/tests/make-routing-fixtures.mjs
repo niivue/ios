@@ -121,12 +121,15 @@ writeFileSync(
   `Every file here must DRAW AN IMAGE when you press Space.
 
   volumes   four tiles: axial, coronal, sagittal, 3D render
-  geometry  one fitted 3D view you can drag to rotate
+  geometry  one fitted 3D view
+
+The preview is STATIC by design on Mac Catalyst: a drag moves the Quick Look
+window, as it does over any other preview, and the image must NOT rotate or
+turn blue. See the interaction decision in quicklook_plan.md.
 
 Also check while you are here:
   - series4d.nii reports "frames 1 of 8" in the strip
-  - dragging rotates WITHOUT moving the Quick Look window, and without
-    the panel turning blue
+  - resizing the panel keeps the render sharp
   - the filename edge cases behave like plain.nii: UPPER.NII, MiXeD.NiI,
     "with spaces.nii", the Unicode name, the 180-character name, and
     readonly.nii (mode 444)

@@ -77,7 +77,6 @@ SWIFT
 
 FAILED=0
 CHECKED=0
-SKIPPED=0
 printf "${DIM}%-35s %-32s %-7s %-8s %s${N}\n" FIXTURE RESOLVED-TYPE ROUTES SHOULD VERDICT
 while IFS=$'\t' read -r name type; do
   # Tab-separated, and read with IFS set: a filename containing a space would
@@ -92,7 +91,6 @@ while IFS=$'\t' read -r name type; do
   [ ${#short} -gt 34 ] && short="${short:0:16}…${short: -17}"
   case "$render" in
     yes) want="render" ;;
-    skip) want="skipped"; SKIPPED=$((SKIPPED + 1)) ;;
     *)   want=$([ "$routes" = yes ] && echo "explain" || echo "not ours") ;;
   esac
   if [ "$routes" = "$expect" ]; then
@@ -117,7 +115,10 @@ if [ "$FAILED" -eq 0 ]; then
 else
   echo "${R}$FAILED of $CHECKED fixture(s) routed unexpectedly.${N}"
 fi
-[ "$SKIPPED" -gt 0 ] && echo "${DIM}$SKIPPED fixture(s) borrowed from the private dev-images package, which is absent.${N}"
+# The generator writes borrowed fixtures only when dev-images is present and
+# emits no row for the others, so a short run is coverage lost, not a failure.
+EXPECTED_FULL=38
+[ "$CHECKED" -lt "$EXPECTED_FULL" ] && echo "${DIM}$((EXPECTED_FULL - CHECKED)) fixture(s) skipped — see the stderr notes above.${N}"
 echo
 echo "${B}Manual half${N} — Finder cannot be driven from a shell. Two folders,"
 echo "one rule each; each carries a README.txt spelling out what to look for."

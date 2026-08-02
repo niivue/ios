@@ -154,33 +154,6 @@ function showMetadataOnly(name: string, pairs: Record<string, string>, reason: s
   showFallback(`No image preview for this file — ${reason}.`)
 }
 
-/**
- * Take ownership of drags on the canvas.
- *
- * NiiVue's `pointerdown` handler does not call `preventDefault`
- * (`control/interactions.ts`), so the gesture is left "unhandled" as far as the
- * host is concerned and two defaults fire on top of the rotation the user
- * actually asked for:
- *
- * - **AppKit drags the Quick Look panel itself.** A QL panel is movable by its
- *   background, so an unclaimed drag moves the window. That also produces the
- *   jitter, because NiiVue keeps tracking the pointer while the window slides
- *   out from under it — the two fight over the same delta.
- * - **WebKit starts a text selection**, which paints the system selection
- *   colour over the whole canvas box. `user-select: none` in the stylesheet
- *   covers that one; this covers both.
- *
- * Safe because NiiVue binds **only** pointer events on the canvas —
- * `pointerdown`, `pointerup`, `pointermove`, and no mouse listeners
- * (`control/interactions.ts:2092-2098`) — so suppressing the compatibility
- * mouse events costs it nothing. `preventDefault` does not stop propagation, so
- * NiiVue's own handler still runs; capture phase only guarantees we are reached
- * even when it returns early.
- */
-function claimPointerGestures(): void {
-  canvas().addEventListener('pointerdown', (event) => event.preventDefault(), { capture: true })
-}
-
 /*
  * There is no ResizeObserver here, deliberately. Milestone 2 added one to keep
  * the drawing buffer matched as Finder resizes the panel; it observed the
@@ -232,9 +205,9 @@ const QUADRANTS: CustomLayoutTile[] = [
  * No camera fitting is done here on purpose. NiiVue derives its orthographic
  * frustum from the object's own extents (`baseScale = 0.8 * furthestFromPivot`
  * in `math/NVTransforms.ts`), so `scaleMultiplier` at its default of 1 already
- * *is* the fitted view. Orbit and zoom then come free from NiiVue's own
- * handlers — the overlays are `display: none` when hidden, so the canvas keeps
- * the pointer events.
+ * *is* the fitted view — which matters more than it used to, because the
+ * canvas is `pointer-events: none` and the user cannot correct the framing by
+ * dragging. See the interaction decision in `quicklook_plan.md`.
  */
 async function renderMesh(instance: NiiVue, request: PreviewRequest): Promise<void> {
   let mesh: NVMesh
@@ -336,34 +309,35 @@ function present(
 ): void {
   if (settled) return
   settled = true
-  let drew = false
+  let posted = false
   try {
     stage.loading.hidden = true
     if (summary.displayable) {
       configure()
       showMetadata(request.displayName, summary.pairs)
       nv?.drawScene()
-      drew = true
     } else {
       // A successful request that has nothing to draw. Reported as `loaded`,
       // not `failed`: the native side would replace our panel — and its
       // metadata — with Quick Look's generic one.
       showMetadataOnly(request.displayName, summary.pairs, summary.reason ?? 'unsupported data')
     }
-  } catch (error) {
-    drew = false
-    showFallback(failureText.internal)
+    // Inside the `try`, so a throw above skips it and the catch owns the
+    // outcome. It cannot be in a `finally`: a `return` from the catch still
+    // runs one, which posted `loaded` on top of `failed` whenever the throw
+    // happened in the non-displayable branch.
     post({
-      stage: 'failed',
-      code: 'internal',
-      message: error instanceof Error ? error.message : String(error),
+      stage: 'loaded',
+      metadata: { ...summary.pairs, displayable: String(summary.displayable) },
     })
-    return
-  } finally {
-    if (drew || !summary.displayable) {
+    posted = true
+  } catch (error) {
+    showFallback(failureText.internal)
+    if (!posted) {
       post({
-        stage: 'loaded',
-        metadata: { ...summary.pairs, displayable: String(summary.displayable) },
+        stage: 'failed',
+        code: 'internal',
+        message: error instanceof Error ? error.message : String(error),
       })
     }
   }
@@ -393,7 +367,6 @@ async function main(): Promise<void> {
       meshXRay: 0.05,
     })
     await nv.attachToCanvas(canvas())
-    claimPointerGestures()
   } catch (error) {
     // Both graphics backends are gone. The native side turns this into its own
     // fallback view; without the message it would see a black rectangle.

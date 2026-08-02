@@ -201,7 +201,10 @@ code path performs a network request.
 | Streamlines | `.tck`, `.trk`, `.trx` | fitted 3D bundle, directional colouring |
 
 Volumes are drawn in **neurological orientation** with the crosshair centred and
-orientation labels visible. Drag to rotate the 3D view; the panel is resizable.
+orientation labels visible. The panel is resizable, and the view re-renders to
+fit. The preview itself is **static** — dragging moves the Quick Look window, as
+it does over any other preview, rather than rotating the image. Open the file in
+the app for an interactive view.
 A compact strip along the bottom reports format, dimensions, voxel size, field
 of view, datatype, orientation and file size — all read from the header. No
 free-text or patient-adjacent header field is ever displayed.
