@@ -542,18 +542,86 @@ address reuse. The dispatched closure holds the task strongly until after
 
 ## Quick Look preview extension (in progress)
 
-`quicklook_plan.md` is the plan and the record. Status: **Milestones 0.5–5
-landed** (2026-08-01), Milestone 6 **dropped** (no detached formats in v1 —
-`.hdr` is Apple's Radiance image type and `.img` its disk-image type, so
-claiming them is not acceptable; `.mhd` was un-claimed as a consequence).
-Milestone 8's automated half is done — `./scripts/check-quicklook-routing.sh`
-verifies 34 routing fixtures (uppercase, compound, Unicode, spaces, long names,
-read-only, and the negative cases) against the appex's own claimed types, and
-`README.md` documents formats, fallbacks, limits and troubleshooting. What
-remains is Finder-only: per-format spacebar sweep, discovery after reinstall and
-reboot, the timing gate, and twenty open/dismiss cycles.
-The extension does **not** ship yet — `README.md` describes it, so treat that as
-planned, not delivered.
+Built and working; **not released**. `README.md` documents it for users — treat
+that as describing the branch, not a shipped feature. The planning document
+(`quicklook_plan.md`) was deleted once its content was executed; everything
+below is what survived it, plus what is still open.
+
+### Still outstanding
+
+All Finder-facing, because `qlmanage -p` emits nothing from a non-GUI shell and
+the headless suite cannot see the panel:
+
+- Per-format spacebar sweep of `good/` and `bad/` (run
+  `./scripts/check-quicklook-routing.sh`, which builds both and prints the
+  `open` commands). In particular: `archive.tar.gz` must keep Finder's own
+  preview, not ours.
+- Space opens/closes, Escape dismisses, the panel resizes.
+- Discovery after a clean install, app replacement, cache reset, and reboot.
+- The **≤2 s gate**, from `preparePreviewOfFile` entry to `loaded`, with cold
+  extension-launch cost reported separately. Read it from the container trace
+  file, not `log show`.
+- **Twenty sequential open/dismiss cycles** returning near baseline memory.
+- Intel Macs: builds universal, verified on Apple Silicon only. Say that rather
+  than claiming Intel support.
+
+### Open decisions, none of them mine to make
+
+- **An oversize legitimate 4D series is now refused** ("This file is too large
+  to preview") rather than shown at frame zero, which is what `limitFrames4D`
+  was adopted to avoid. Either raise the cap on measured device headroom, or
+  route oversize 4D to the metadata-only panel that already exists.
+- **`maxDecodedBytes` is not calibrated.** It counts decoded *file* bytes, but
+  NiiVue additionally allocates `Float32Array(nVox3D*3)` + `Uint8Array(nVox3D*4)`,
+  so for uint8 data the content-process peak is roughly **17×** what the gate
+  counts. Conservative in the right direction; needs a device measurement.
+- **Teardown does not release the NiiVue instance or the `WKWebView`.** The
+  WebGL context, decoded volume and 3D textures live until the controller
+  deallocates. Note `webView.load(about:blank)` is not available as a fix — the
+  navigation delegate allows only the app scheme. Verify any fix with the
+  twenty-cycle RSS measurement rather than asserting it.
+
+### Standing obligations
+
+- **The `.gz` claim must stay strict.** The extension claims
+  `org.gnu.gnu-zip-archive` because macOS resolves a type from the last
+  extension component only, so `.nii.gz` cannot have its own UTI — that makes us
+  the previewer for *every* gzip on the machine. `GzipPeek` + `VolumeSniff` read
+  the actual header. Do not loosen the sniff, and never render on the strength
+  of a filename. (Both comparable tools — NIfTIViewQL and MIQ — take the same
+  broad claim but discriminate by *filename*, which mis-accepts a renamed file
+  and mis-rejects a correct one. Ours is stronger; keep it that way.)
+  A foreign archive is declined with an `NSError` so Finder falls back —
+  behaviour that is **not** documented by Apple and is still unverified against
+  a competing archive previewer. See `README.md`.
+- **No detached formats.** NIfTI `.hdr`/`.img`, `.mhd`, AFNI `.HEAD`/`.BRIK`,
+  `.nhdr` are out. `.hdr` resolves to **`public.radiance`** (Apple's HDR image
+  type, which has a working preview) and `.img` to
+  **`com.apple.disk-image-udif`**, so claiming them is not acceptable; and
+  rendering any detached pair needs sibling read access Quick Look does not
+  grant. `.mhd` was un-claimed as a consequence. Self-contained `.mha`/`.nrrd`
+  are unaffected.
+- **Known gap:** `.gii.gz` is declined — it resolves to generic gzip and the
+  NIfTI sniff correctly rejects it. Teaching the sniff to recognise GIFTI XML is
+  possible but is exactly what the obligation above forbids without a decision.
+- `files.user-selected.read-only` is **kept**: the narrowest file entitlement
+  available, matching Apple's own template, and it grants nothing absent a user
+  selection the extension never performs. Removing it is a plausible tightening
+  that needs a Finder run to validate.
+
+### The recurring failure mode in this work
+
+Two patterns cost most of the time spent here, and both will recur:
+
+1. **Tests shaped so they cannot fail.** A routing script that reported success
+   having resolved zero fixtures; a "four non-blank tiles" gate that passed
+   against dead code; `before === after` satisfied by a blank canvas; a suite
+   that served fixtures at URLs the extension never uses, hiding a bug that
+   broke every mesh format; an install verifier that certified a stale binary.
+   Ask of every check: *if the thing under test were broken, would this fail?*
+2. **Fix-commits are the richest source of new bugs.** Every audit round found
+   that most defects had been introduced by the previous round's fixes. Audit
+   the fix, not just the original.
 
 Web-side checks for the preview live in
 `NiiVue/React/tests/preview-regression.mjs` (`npm run test:preview`, 78 checks)

@@ -126,8 +126,8 @@ writeFileSync(
 A drag inside the preview must move the crosshair in the slice views, or rotate
 the 3D render — and the Quick Look WINDOW must stay put, with no blue tint even
 on a long drag. If the window moves, or the panel goes blue, that is the
-regression this branch exists to prevent; see the interaction section of
-quicklook_plan.md.
+regression this branch exists to prevent; see the Quick Look section of
+CLAUDE.md.
 
 Also check while you are here:
   - series4d.nii reports "frames 1 of 8" in the strip
