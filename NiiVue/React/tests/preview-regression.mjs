@@ -433,18 +433,26 @@ const after = (await page.locator('#gl').screenshot({ type: 'png' })).toString('
 const stillLit = (await quadrantPixels(page)).reduce((a, b) => a + b)
 check('a primary drag rotates the render', before !== after && stillLit > 500, `${stillLit} lit px`)
 
-// And the page must claim it, or the host takes the same drag as a window move
-// on top of the rotation — which is the jitter, and half the fix.
-const claimed = await page.evaluate(() => {
-  let prevented = null
-  const probe = (e) => { prevented = e.defaultPrevented }
+// The drag must NOT be preventDefault'd: the selection WebKit starts is what
+// keeps the gesture away from the host window, and suppressing it is what made
+// the panel draggable. The tint that selection would otherwise paint is killed
+// by `::selection { background: transparent }`, not by preventing it.
+const notClaimed = await page.evaluate(() => {
   const gl = document.getElementById('gl')
-  gl.addEventListener('pointerdown', probe)
-  gl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }))
-  gl.removeEventListener('pointerdown', probe)
-  return prevented
+  const event = new PointerEvent('pointerdown', { bubbles: true, cancelable: true })
+  gl.dispatchEvent(event)
+  return event.defaultPrevented
 })
-check('and the page claims the gesture rather than the host', claimed === true, `defaultPrevented=${claimed}`)
+check('the page leaves the default action alone', notClaimed === false, `defaultPrevented=${notClaimed}`)
+const selectionPaint = await page.evaluate(() => {
+  const probe = document.createElement('div')
+  probe.textContent = 'x'
+  document.body.append(probe)
+  const bg = getComputedStyle(probe, '::selection').backgroundColor
+  probe.remove()
+  return bg
+})
+check('and selection is invisible rather than disabled', /rgba\(0, 0, 0, 0\)|transparent/.test(selectionPaint), selectionPaint)
 
 // Finder resizes the panel freely; the drawing buffer must follow, or the
 // render is upscaled and soft.

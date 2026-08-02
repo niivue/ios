@@ -154,23 +154,17 @@ function showMetadataOnly(name: string, pairs: Record<string, string>, reason: s
   showFallback(`No image preview for this file — ${reason}.`)
 }
 
-/**
- * Claim drags on the canvas for the page.
+/*
+ * There is deliberately NO `preventDefault` on `pointerdown` here.
  *
- * NiiVue's `pointerdown` handler never calls `preventDefault`
- * (`control/interactions.ts`), so the gesture is left unclaimed and the host is
- * free to treat it as a window drag on top of the rotation the user asked for.
- * This is necessary but, on its own, was not sufficient — the UIKit half in
- * `PreviewViewController.loadView` is the other half of the same fix.
- *
- * Safe because NiiVue binds only pointer events on the canvas
- * (`control/interactions.ts:2092-2098`) and no mouse listeners, so suppressing
- * the compatibility mouse events costs it nothing; `preventDefault` does not
- * stop propagation, so NiiVue's own handler still runs.
+ * It looks like the right thing — NiiVue never calls it, so the gesture is
+ * "unclaimed" — but suppressing the default action also suppresses the document
+ * selection WebKit would otherwise start, and that selection is what keeps the
+ * drag away from the host window. Adding it is what introduced the
+ * window-dragging behaviour in the first place. The blue tint it was fixing is
+ * handled in the stylesheet instead, by making the selection invisible rather
+ * than preventing it.
  */
-function claimPointerGestures(): void {
-  canvas().addEventListener('pointerdown', (event) => event.preventDefault(), { capture: true })
-}
 
 /*
  * There is no ResizeObserver here, deliberately. Milestone 2 added one to keep
@@ -384,7 +378,6 @@ async function main(): Promise<void> {
       meshXRay: 0.05,
     })
     await nv.attachToCanvas(canvas())
-    claimPointerGestures()
   } catch (error) {
     // Both graphics backends are gone. The native side turns this into its own
     // fallback view; without the message it would see a black rectangle.

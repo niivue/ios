@@ -10,6 +10,16 @@
          so the layout is a column that gives every spare pixel to the canvas and
          lets the metadata strip wrap rather than clip. */
       :root { color-scheme: dark; }
+
+      /* Selection is deliberately left ENABLED and made invisible instead.
+         WebKit starts a document selection on a drag that NiiVue does not
+         preventDefault, and that selection is what ABSORBS the gesture — with
+         it suppressed, the drag falls through to the host, which treats it as a
+         window move. So the cure for the blue tint must not be `user-select:
+         none`; it has to leave the selection in place and only stop it being
+         painted. */
+      ::selection { background: transparent; }
+      ::-moz-selection { background: transparent; }
       html, body {
         margin: 0;
         height: 100%;

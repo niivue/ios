@@ -867,14 +867,31 @@ before our view sees it. Attempts, and their **actual** evidential status:
 | --- | --- | --- |
 | capture-phase `preventDefault` on `pointerdown` | yes | fixed the *selection tint* — a separate, real bug. Did not stop the window drag on its own |
 | `webView.isOpaque = true` | yes | no effect on the drag; kept as a correct rendering hint |
-| opaque container `UIView` + full-view `UIPanGestureRecognizer`, `cancelsTouchesInView = false` | **NO** | registered 20:37, never evaluated before being reverted |
+| opaque container `UIView` + full-view `UIPanGestureRecognizer`, `cancelsTouchesInView = false` | **NEVER** | written twice, shipped never — the first was reverted before evaluation, the second was a silently no-op'd edit. Now abandoned, because the mechanism below makes it unnecessary |
 | `-webkit-app-region: no-drag` | yes | no effect (Electron-only) |
 
-On 2026-08-01 this was written up as "four attempts failed" and the preview was
-made static with `pointer-events: none`. **That conclusion was not supported by
-the evidence**: the third attempt was registered and then removed before anyone
-looked at it. Reverted 2026-08-02; the canvas is interactive again and the
-container + recognizer is back, this time to be tested.
+### The mechanism, finally understood (2026-08-02)
+
+The owner's observation settled it: the **original** behaviour was rotation
+working *with* a blue tint, and no window drag. The window drag appeared only
+after the tint was fixed. So the two are the same event.
+
+**WebKit's document selection was absorbing the drag.** NiiVue does not
+`preventDefault` on `pointerdown`, so WebKit starts a selection; that selection
+consumes the gesture, and the host never sees it as a window drag. Suppressing
+the selection — `user-select: none`, and later `preventDefault` — removed the
+absorber and handed the drag straight to the host.
+
+The cure therefore must **not** stop the selection happening. It has to leave it
+in place and stop it being *painted*:
+
+```css
+::selection { background: transparent; }
+```
+
+`user-select: none`, the capture-phase `preventDefault`, the container view and
+the gesture recognizer are all removed. They were all treatments for a symptom
+whose cause was the previous treatment.
 
 ### The testing failure underneath it
 

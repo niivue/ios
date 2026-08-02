@@ -660,17 +660,15 @@ clears the cache, fails if more than one is registered), and confirm with
 `log show --last 2m --predicate 'subsystem == "com.niivue.mobile.QuickLookPreview"' | grep built`
 — the extension logs its own build time on every preview.
 
-**The left-drag/window-drag conflict is not settled.** The host claims a drag
-over remote Catalyst content as a window drag. `preventDefault` in the page plus
-a full-view `UIPanGestureRecognizer` with `cancelsTouchesInView = false` is the
-current attempt; if it fails, the escalation is a native AppKit
-`QLPreviewingController` target where `NSView.mouseDownCanMoveWindow` can be
-overridden — not another gesture layer. Do not conclude it has failed from a
-build you have not verified is the registered one.
-
-**`quicklook.html` sets `user-select: none` on purpose.** A primary drag belongs
-to the native window, not to WebKit text selection. The strip's values still
-reach VoiceOver through `aria-label`.
+**Do NOT suppress text selection in the preview page.** WebKit starts a
+document selection on a drag NiiVue does not `preventDefault`, and that
+selection is what ABSORBS the gesture — without it the drag falls through to the
+host, which treats it as a window move. `user-select: none` and a capture-phase
+`preventDefault` were each tried, and each *introduced* the window-dragging
+behaviour they appeared unrelated to. The blue tint a selection would otherwise
+paint is killed with `::selection { background: transparent }`, which leaves the
+selection intact and invisible. This cost several rounds to work out; the
+symptom and its cause look unconnected.
 
 **`attachToCanvas` replaces the canvas element** — NiiVue `cloneNode(false)`s it
 and calls `replaceChild`, so a reference taken before attaching is detached from

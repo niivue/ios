@@ -48,7 +48,7 @@ private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
-class PreviewViewController: UIViewController, QLPreviewingController, WKScriptMessageHandler, WKNavigationDelegate, UIGestureRecognizerDelegate {
+class PreviewViewController: UIViewController, QLPreviewingController, WKScriptMessageHandler, WKNavigationDelegate {
 
     /// Files arriving as plain gzip. See `disposition(for:)`.
     private static let gzipType = "org.gnu.gnu-zip-archive"
@@ -163,7 +163,10 @@ class PreviewViewController: UIViewController, QLPreviewingController, WKScriptM
         webView.scrollView.isScrollEnabled = false
         // A preview is not a browser: no swipe-back, no link navigation.
         webView.allowsBackForwardNavigationGestures = false
-
+        // No container view and no gesture recognizer. Claiming the drag for
+        // UIKit was an attempt to take it back from the host, and it is
+        // unnecessary if the drag is never handed over in the first place —
+        // which is what leaving WebKit's own selection intact achieves.
         view = webView
     }
 
