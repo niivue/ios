@@ -4,5 +4,183 @@
 <dict>
 	<key>UIFileSharingEnabled</key>
 	<true/>
+
+	<!-- Type declarations for the Quick Look preview extension live HERE, in the
+	     containing app, NOT in the .appex. Declared only in the extension they are
+	     ignored outright: the file keeps resolving to a `dyn.*` type and the
+	     extension is never matched. Verified both ways in the Milestone 0.5 spike.
+
+	     `.nii` is deliberately absent — macOS already declares `gov.nih.nifti-1`
+	     in CoreTypes.bundle, so re-declaring it would only add a second claimant
+	     for a type we agree with. The extension simply lists it in
+	     QLSupportedContentTypes.
+
+	     Every gzip-backed type below conforms to `org.gnu.gnu-zip-archive` so it
+	     remains a *kind of* gzip archive. The extension must never register for
+	     `org.gnu.gnu-zip-archive` itself — that would intercept every .gz on the
+	     machine, and it is an explicit negative test for this milestone. -->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<!-- There is deliberately NO `gov.nih.nifti-1-gzip` declaration here.
+		     It was tried and removed: it registers correctly, carries the
+		     `nii.gz` tag, and still never matches anything, because macOS
+		     resolves a type from the last extension component only. Leaving it
+		     in would be dead config that reads as if `.nii.gz` were handled.
+		     `.nii.gz` reaches the extension via `org.gnu.gnu-zip-archive` plus a
+		     content sniff instead — see QuickLookPreview/Info.plist. -->
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>edu.mgh.freesurfer.mgh</string>
+			<key>UTTypeDescription</key>
+			<string>FreeSurfer MGH Volume</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>mgh</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>edu.mgh.freesurfer.mgz</string>
+			<key>UTTypeDescription</key>
+			<string>Gzipped FreeSurfer MGH Volume</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>mgz</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.nrrd.nrrd</string>
+			<key>UTTypeDescription</key>
+			<string>NRRD Volume</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>nrrd</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.itk.metaimage</string>
+			<key>UTTypeDescription</key>
+			<string>MetaImage Volume</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>mha</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.nitrc.gifti</string>
+			<key>UTTypeDescription</key>
+			<string>GIFTI Surface</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.xml</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>gii</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.niivue.mz3</string>
+			<key>UTTypeDescription</key>
+			<string>MZ3 Mesh</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>mz3</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.mrtrix.tck</string>
+			<key>UTTypeDescription</key>
+			<string>MRtrix Streamlines</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>tck</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.trackvis.trk</string>
+			<key>UTTypeDescription</key>
+			<string>TrackVis Streamlines</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>trk</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.trx.trx</string>
+			<key>UTTypeDescription</key>
+			<string>TRX Streamlines</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>trx</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>

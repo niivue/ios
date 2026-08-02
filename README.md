@@ -8,11 +8,12 @@ The native components of the application are written in Swift, and the medical i
 
 - View MRI/CT images in common formats used in medical research
 - Draw and segment images (Apple Pencil is supported as a touch device)
-- Save and load images from the local device (no data is sent to a server)
+- Open images from the local device (no data is sent to a server)
 - Works in Airplane mode
 - Customise viewing options (e.g. window/level, zoom/pan, etc.)
 - Multiple layouts supported
-- Save drawings to the Files app on iPhone/iPad
+- Save drawings wherever you choose — the Files "Save to" sheet on iPhone/iPad,
+  a real `NSSavePanel` on macOS
 - A bundled demo volume (`T1w_DEMO.nii.gz`) loads automatically at launch
 
 ## macOS support
@@ -128,7 +129,10 @@ below. Connect the device, then `xcrun devicectl list devices` to find it and us
 its UDID as the destination `id`, or just use Xcode's Run button.
 
 Either way the app opens on the bundled demo volume; the **+** button opens the
-document picker for your own `.nii` / `.nii.gz` files.
+document picker. It is deliberately unfiltered — NiiVue reads NIfTI plus mgh/mgz,
+nrrd/nhdr, mha/mhd, mif/mih, AFNI, npy/npz, vmr/v16, src, fib, ecat and more, and
+almost none of those have a registered system UTI — so a file the renderer rejects
+raises a named alert rather than being greyed out in the picker.
 
 **Signing.** To see which certificates this Mac holds, which Apple team they
 belong to, and therefore which targets will build:
@@ -172,3 +176,129 @@ simulator or device.
 
 See [`NiiVue/React/README.md`](NiiVue/React/README.md) for the bridge contract and
 [`CLAUDE.md`](CLAUDE.md) for architecture notes and the NiiVue 0.41 → 1.0 API map.
+
+### Quick Look Preview
+
+On macOS, this tool also provides a Quick Look Preview extension: select a file
+in Finder, press Space, and the image is rendered in place. This is a
+differentiator relative to other voxel-based viewers including
+[NIfTIViewQL](https://github.com/pmolfese/NIfTIViewQL) and
+[MIQ](https://github.com/marcoduering/MIQ), which preview NIfTI only.
+
+The extension is offline by construction — every asset is bundled, the page is
+served over a private scheme under a self-only Content Security Policy, and no
+code path performs a network request.
+
+#### Supported formats
+
+| Family | Extensions | Shown as |
+| --- | --- | --- |
+| NIfTI | `.nii`, `.nii.gz` | Axial / Coronal / Sagittal / 3D render |
+| MGH | `.mgh`, `.mgz` | Axial / Coronal / Sagittal / 3D render |
+| NRRD | `.nrrd` | Axial / Coronal / Sagittal / 3D render |
+| MetaImage | `.mha` | Axial / Coronal / Sagittal / 3D render |
+| GIFTI, MZ3 | `.gii`, `.mz3` | fitted 3D surface |
+| Streamlines | `.tck`, `.trk`, `.trx` | fitted 3D bundle, directional colouring |
+
+Volumes are drawn in **neurological orientation** with the crosshair centred and
+orientation labels visible. The panel is resizable, and the view re-renders to
+fit. Drag inside the preview to move the crosshair in the slice views or to
+rotate the 3D render; drag the panel's edges or title area to move the window.
+A compact strip along the bottom reports format, dimensions, voxel size, field
+of view, datatype, orientation and file size — all read from the header. No
+free-text or patient-adjacent header field is ever displayed.
+
+**4D data shows frame zero only**, and says so: the strip reads `frames 1 of N`
+rather than hiding the rest.
+
+#### What is deliberately not previewed
+
+- **Detached formats** — NIfTI `.hdr`/`.img`, MetaImage `.mhd`, AFNI
+  `.HEAD`/`.BRIK` and NRRD `.nhdr`. Two reasons: a Quick Look extension is
+  granted read access to the previewed file only, not its siblings, so the image
+  data is out of reach; and `.hdr`/`.img` are already macOS types (Radiance HDR
+  images and disk images), which this extension will not take over.
+- **Gzipped meshes** (`.gii.gz`). A `.gz` is accepted only when its content is a
+  NIfTI, and that check is deliberately strict.
+- **FreeSurfer surfaces** (`.white`, `.pial`, …), `.obj`, `.stl`, `.ply` — their
+  extensions are too generic, or better served by existing viewers.
+
+#### When there is no image
+
+The panel never goes blank. A file that parses but cannot produce an ordinary
+view — a single-slice volume, a truncated file, a GIFTI holding only per-vertex
+values — shows its metadata plus a line explaining why. A file that cannot be
+read at all shows a short reason. Errors never include a filesystem path.
+
+Previews are refused before loading if the file exceeds 256 MB on disk, or if
+its header claims more than 256 MB of voxel data for a single frame. The second
+check is what stops a small file with impossible dimensions.
+
+#### Non-NIfTI `.gz` files
+
+Because macOS resolves a file's type from its last extension only, `.nii.gz` can
+reach the extension only by claiming generic gzip. Every `.gz` on the machine
+therefore reaches this extension, which reads the gzip header, checks whether
+the payload is a NIfTI, and returns an error for anything else so that Finder
+falls back to another preview provider.
+
+This is also why the Quick Look panel's action button reads **"Uncompress"** for
+a `.nii.gz` rather than offering to open it: that button shows whichever app
+owns the file's type, and a `.nii.gz` genuinely *is* a gzip archive as far as
+macOS is concerned. The preview itself is unaffected.
+
+Note that error-driven fallback is not documented behaviour: Apple specifies the
+completion handler as the signal that the view is ready, not as a way to decline
+in favour of another provider. Returning an error is what the two comparable
+tools (NIfTIViewQL, MIQ) do and they are in shipping use, but whether a foreign
+archive keeps its previous preview has **not** been verified here against a
+clean install with a competing archive previewer installed. If it turns out that
+a `.gz` loses its normal preview, the honest options are to document the
+takeover or to drop `.nii.gz` support — not to leave this paragraph as it is.
+
+#### Turning the preview off
+
+Quick Look extensions are managed by macOS, not by this app:
+
+**System Settings → General → Login Items & Extensions → Quick Look**
+
+Untick NiiVue there and the extension is no longer launched at all — `.nii.gz`
+and every other `.gz` fall straight through to whatever previewed them before.
+That is a stronger off switch than an in-app setting could be, which is why
+there isn't one: an app cannot set its own extension's state, so a checkbox here
+could only make the extension start up and then decline.
+
+The same thing from a script, for a managed or scripted setup:
+
+```sh
+pluginkit -e ignore  -i com.niivue.mobile.QuickLookPreview   # off
+pluginkit -e use     -i com.niivue.mobile.QuickLookPreview   # on
+pluginkit -e default -i com.niivue.mobile.QuickLookPreview   # back to default (on)
+
+# What is registered, and its current state:
+#   "+" enabled by an explicit choice, "-" disabled, blank means default
+pluginkit -m -v -i com.niivue.mobile.QuickLookPreview
+```
+
+Deleting the app removes the extension with it.
+
+#### Troubleshooting
+
+If pressing Space shows nothing, or the old previewer:
+
+```sh
+# Confirm macOS knows about the extension
+pluginkit -m -v -A -D | grep niivue
+
+# Re-register the app and clear Quick Look's cache
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+  -f -R /Applications/NiiVue.app
+qlmanage -r && qlmanage -r cache
+
+# Confirm the extension is being invoked at all (development builds only)
+tail -5 ~/Library/Containers/com.niivue.mobile.QuickLookPreview/Data/tmp/quicklook-preview.log
+```
+
+The app must have been launched at least once, and must live somewhere Launch
+Services scans (`/Applications` is reliable). `qlmanage -p` does **not** work
+from a plain terminal session — use Finder.
