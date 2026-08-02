@@ -893,6 +893,27 @@ in place and stop it being *painted*:
 ::selection { background: transparent; }
 ```
 
+That was not sufficient on its own. It suppresses the tint in Playwright's
+WebKit — verified with a control that forces `background: Highlight`, which goes
+from `blueFrac 1.0` to `0.0` — but in the real Quick Look panel a long drag over
+a mesh still tinted the whole page. So the range is also torn down as soon as it
+forms:
+
+```ts
+document.addEventListener('selectionchange', () => {
+  const selection = document.getSelection()
+  if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+    selection.removeAllRanges()
+  }
+})
+```
+
+This is the part that does not depend on how an engine paints a selected
+replaced element: there is nothing selected by the time it would paint. It
+defeats even the forced-`Highlight` control. Crucially it still lets the
+selection **form**, which is what absorbs the drag — the difference from
+`user-select: none` is one of timing, not of effect.
+
 `user-select: none`, the capture-phase `preventDefault`, the container view and
 the gesture recognizer are all removed. They were all treatments for a symptom
 whose cause was the previous treatment.

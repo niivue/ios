@@ -666,8 +666,13 @@ selection is what ABSORBS the gesture — without it the drag falls through to t
 host, which treats it as a window move. `user-select: none` and a capture-phase
 `preventDefault` were each tried, and each *introduced* the window-dragging
 behaviour they appeared unrelated to. The blue tint a selection would otherwise
-paint is killed with `::selection { background: transparent }`, which leaves the
-selection intact and invisible. This cost several rounds to work out; the
+paint is killed two ways, both of which leave the selection free to FORM:
+`::selection { background: transparent }`, and a `selectionchange` listener that
+clears any range as soon as one appears. The second is what actually works in
+the Quick Look panel — `::selection` suppressed the tint in Playwright's WebKit
+but not in the real panel, where a long drag over a mesh still tinted the whole
+page. Clearing the range does not depend on how an engine paints a selected
+`<canvas>`, because nothing is selected by the time it would paint. This cost several rounds to work out; the
 symptom and its cause look unconnected. A left drag now moves the crosshair and
 rotates the render with the window staying put — verified in Finder, not
 inferred.

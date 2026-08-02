@@ -454,6 +454,20 @@ const selectionPaint = await page.evaluate(() => {
 })
 check('and selection is invisible rather than disabled', /rgba\(0, 0, 0, 0\)|transparent/.test(selectionPaint), selectionPaint)
 
+// Belt and braces, and the part that does not depend on how an engine paints a
+// selected <canvas>: a selection that does form is torn down immediately. The
+// distinction from `user-select: none` is that it is allowed to FORM first —
+// that is what absorbs the drag and keeps it away from the host window.
+const rangesAfterSelectAll = await page.evaluate(async () => {
+  document.execCommand('selectAll')
+  // `selectionchange` is dispatched as a task, so the range survives the
+  // synchronous turn and is gone by the next one — before paint, which is why
+  // there is no visible flash.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  return document.getSelection()?.rangeCount ?? -1
+})
+check('a selection that forms is cleared immediately', rangesAfterSelectAll === 0, `${rangesAfterSelectAll} ranges`)
+
 // Finder resizes the panel freely; the drawing buffer must follow, or the
 // render is upscaled and soft.
 await page.setViewportSize({ width: 940, height: 700 })

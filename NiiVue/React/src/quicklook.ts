@@ -154,6 +154,33 @@ function showMetadataOnly(name: string, pairs: Record<string, string>, reason: s
   showFallback(`No image preview for this file — ${reason}.`)
 }
 
+/**
+ * Let the selection happen, then immediately unmake it.
+ *
+ * The distinction is the whole trick, and it is not cosmetic. Preventing a
+ * selection from STARTING — `user-select: none`, or `preventDefault` on
+ * `pointerdown` — also removes what absorbs the drag, and the gesture falls
+ * through to the host as a window move. Clearing a selection that has already
+ * started leaves WebKit in its drag-tracking mode with the pointer captured, so
+ * the host still never sees the drag; there is simply no range left to paint.
+ *
+ * `::selection { background: transparent }` in the stylesheet handles this for
+ * text and, in Playwright's WebKit, for the canvas too — but not in the real
+ * Quick Look panel, where a long drag still tinted the whole page. This does
+ * not depend on how any engine chooses to paint a selected replaced element,
+ * because there is nothing selected by the time it would paint.
+ */
+function hideSelection(): void {
+  document.addEventListener('selectionchange', () => {
+    const selection = document.getSelection()
+    // `removeAllRanges` re-fires this event; the guard makes the second pass a
+    // no-op rather than a loop.
+    if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+      selection.removeAllRanges()
+    }
+  })
+}
+
 /*
  * There is deliberately NO `preventDefault` on `pointerdown` here.
  *
@@ -378,6 +405,7 @@ async function main(): Promise<void> {
       meshXRay: 0.05,
     })
     await nv.attachToCanvas(canvas())
+    hideSelection()
   } catch (error) {
     // Both graphics backends are gone. The native side turns this into its own
     // fallback view; without the message it would see a black rectangle.
